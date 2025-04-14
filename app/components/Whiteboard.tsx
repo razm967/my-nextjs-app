@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import TextBlock from './TextBlock';
+import TextBlock, { ConnectionPointPosition } from './TextBlock';
 
 // Define text formatting options interfaces
 interface TextFormat {
@@ -17,13 +17,34 @@ interface TextFormat {
   isStrikethrough: boolean;
 }
 
+// Add Position interface from TextBlock
+interface Position {
+  x: number;
+  y: number;
+  _timestamp?: number;
+}
+
 interface Block {
   id: string;
   title: string;
   content: string;
-  position: { x: number; y: number };
+  position: Position;
   type?: string;
   format?: TextFormat;
+  titleFormat?: TextFormat;
+  updatedAt?: number; // Timestamp for tracking updates
+}
+
+// Update Connection interface to include source and target points
+interface Connection {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  sourcePoint: ConnectionPointPosition;
+  targetPoint: ConnectionPointPosition;
+  label?: string;
+  type?: 'straight' | 'curved';
+  color?: string;
 }
 
 const Whiteboard = () => {
@@ -33,6 +54,24 @@ const Whiteboard = () => {
   const [windowDimensions, setWindowDimensions] = useState({ width: 0, height: 0 });
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
   const [activeEditingField, setActiveEditingField] = useState<'title' | 'content' | null>(null);
+  const [fontDropdownOpen, setFontDropdownOpen] = useState(false);
+  const [fontSearchValue, setFontSearchValue] = useState('');
+  const [textColorDropdownOpen, setTextColorDropdownOpen] = useState(false);
+  const [bgColorDropdownOpen, setBgColorDropdownOpen] = useState(false);
+  const [connections, setConnections] = useState<Connection[]>([]);
+  const [isCreatingConnection, setIsCreatingConnection] = useState(false);
+  const [connectionStart, setConnectionStart] = useState<{
+    blockId: string;
+    pointPosition: ConnectionPointPosition;
+    position: {x: number, y: number};
+  } | null>(null);
+  const [cursorPosition, setCursorPosition] = useState<{x: number, y: number}>({x: 0, y: 0});
+  const [nearestPoint, setNearestPoint] = useState<{
+    blockId: string;
+    pointPosition: ConnectionPointPosition;
+    position: {x: number, y: number};
+    distance: number;
+  } | null>(null);
   
   // Default text format
   const defaultTextFormat: TextFormat = {
@@ -47,14 +86,36 @@ const Whiteboard = () => {
     isStrikethrough: false
   };
   
-  // Font family options
-  const fontFamilies = [
+  // Font options
+  const fontOptions = [
     { name: 'Arial', value: 'Arial, sans-serif' },
+    { name: 'Helvetica', value: 'Helvetica, sans-serif' },
     { name: 'Times New Roman', value: 'Times New Roman, serif' },
     { name: 'Courier New', value: 'Courier New, monospace' },
     { name: 'Georgia', value: 'Georgia, serif' },
-    { name: 'Verdana', value: 'Verdana, sans-serif' }
+    { name: 'Verdana', value: 'Verdana, sans-serif' },
+    { name: 'Impact', value: 'Impact, sans-serif' },
+    { name: 'Tahoma', value: 'Tahoma, sans-serif' },
+    { name: 'Trebuchet MS', value: 'Trebuchet MS, sans-serif' },
+    { name: 'Comic Sans MS', value: 'Comic Sans MS, cursive' },
+    { name: 'Lucida Sans', value: 'Lucida Sans, sans-serif' },
+    { name: 'Palatino', value: 'Palatino, serif' },
+    { name: 'Garamond', value: 'Garamond, serif' },
+    { name: 'Book Antiqua', value: 'Book Antiqua, serif' },
+    { name: 'Calibri', value: 'Calibri, sans-serif' },
   ];
+  
+  // Add this filtering function
+  const getFilteredFonts = () => {
+    if (!fontSearchValue) return fontOptions;
+    
+    return fontOptions.filter(font => 
+      font.name.toLowerCase().includes(fontSearchValue.toLowerCase())
+    );
+  };
+  
+  // Make sure this is defined in your component
+  const filteredFonts = getFilteredFonts();
   
   // Font size options
   const fontSizes = [
@@ -65,16 +126,24 @@ const Whiteboard = () => {
     { name: 'Extra Large', value: '28px' }
   ];
   
-  // Color options
+  // Color options with expanded palette
   const colorOptions = [
-    { name: 'Black', value: '#333333' },
-    { name: 'Dark Gray', value: '#666666' },
-    { name: 'Gray', value: '#999999' },
-    { name: 'Blue', value: '#007BFF' },
-    { name: 'Red', value: '#DC3545' },
-    { name: 'Green', value: '#28A745' },
-    { name: 'Yellow', value: '#FFC107' },
-    { name: 'Purple', value: '#6F42C1' }
+    { name: 'Black', value: '#000000' },
+    { name: 'Gray', value: '#808080' },
+    { name: 'Silver', value: '#c0c0c0' },
+    { name: 'White', value: '#ffffff' },
+    { name: 'Red', value: '#ff0000' },
+    { name: 'Maroon', value: '#800000' },
+    { name: 'Yellow', value: '#ffff00' },
+    { name: 'Olive', value: '#808000' },
+    { name: 'Lime', value: '#00ff00' },
+    { name: 'Green', value: '#008000' },
+    { name: 'Aqua', value: '#00ffff' },
+    { name: 'Teal', value: '#008080' },
+    { name: 'Blue', value: '#0000ff' },
+    { name: 'Navy', value: '#000080' },
+    { name: 'Fuchsia', value: '#ff00ff' },
+    { name: 'Purple', value: '#800080' },
   ];
   
   // Add window resize handler and initialize dimensions
@@ -96,6 +165,84 @@ const Whiteboard = () => {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+  
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      // Close font dropdown if clicking outside
+      const fontDropdown = document.querySelector('.font-family-dropdown');
+      if (fontDropdown && !fontDropdown.contains(e.target as Node)) {
+        setFontDropdownOpen(false);
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+  
+  // Close font selector on escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && fontDropdownOpen) {
+        setFontDropdownOpen(false);
+        setFontSearchValue('');
+      }
+    };
+    
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [fontDropdownOpen]);
+  
+  // Close font selector when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const fontSelector = document.querySelector('.font-selector-modal');
+      const fontButton = document.querySelector('.font-selector-button');
+      
+      if (fontDropdownOpen && fontSelector && 
+          !fontSelector.contains(e.target as Node) && 
+          fontButton && !fontButton.contains(e.target as Node)) {
+        setFontDropdownOpen(false);
+        setFontSearchValue('');
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [fontDropdownOpen]);
+  
+  // Add this effect to handle closing color modals when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const textColorModal = document.querySelector('.text-color-modal');
+      const textColorButton = document.querySelector('.text-color-button');
+      const bgColorModal = document.querySelector('.bg-color-modal');
+      const bgColorButton = document.querySelector('.bg-color-button');
+      
+      if (textColorDropdownOpen && textColorModal && 
+          !textColorModal.contains(e.target as Node) && 
+          textColorButton && !textColorButton.contains(e.target as Node)) {
+        setTextColorDropdownOpen(false);
+      }
+      
+      if (bgColorDropdownOpen && bgColorModal && 
+          !bgColorModal.contains(e.target as Node) && 
+          bgColorButton && !bgColorButton.contains(e.target as Node)) {
+        setBgColorDropdownOpen(false);
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [textColorDropdownOpen, bgColorDropdownOpen]);
   
   // Add a new block at a specific position
   const addBlock = (e?: React.MouseEvent) => {
@@ -123,55 +270,183 @@ const Whiteboard = () => {
       content: 'Click to edit content...',
       position: { x: centerX, y: centerY },
       type: 'text',
-      format: { ...defaultTextFormat }
+      format: { ...defaultTextFormat },
+      titleFormat: { ...defaultTextFormat, fontWeight: 'bold' }
     };
     
     // Update state with the new block
     setBlocks(prevBlocks => [...prevBlocks, newBlock]);
   };
 
+  // Update block position after drag
+  const updateBlockPosition = (id: string, position: Position) => {
+    setBlocks(prevBlocks => prevBlocks.map(block => 
+      block.id === id ? { ...block, position } : block
+    ));
+    
+    console.log(`Updated block position: ${id}`, position);
+    
+    // Force connection updates when a block moves
+    forceConnectionUpdate();
+    
+    // Save blocks to local storage when position changes
+    saveBlocksToLocalStorage();
+  };
+  
+  // Save blocks to localStorage
+  const saveBlocksToLocalStorage = () => {
+    try {
+      localStorage.setItem('whiteboard-blocks', JSON.stringify(blocks));
+      console.log('Blocks saved to localStorage:', blocks.length);
+    } catch (error) {
+      console.error('Error saving blocks to localStorage:', error);
+    }
+  };
+  
+  // Load blocks from localStorage on component mount
+  useEffect(() => {
+    try {
+      const savedBlocks = localStorage.getItem('whiteboard-blocks');
+      if (savedBlocks) {
+        const parsedBlocks = JSON.parse(savedBlocks);
+        console.log('Loaded blocks from localStorage:', parsedBlocks.length);
+        setBlocks(parsedBlocks);
+      }
+    } catch (error) {
+      console.error('Error loading blocks from localStorage:', error);
+    }
+  }, []);
+  
+  // Save blocks when they change
+  useEffect(() => {
+    if (blocks.length > 0) {
+      saveBlocksToLocalStorage();
+    }
+  }, [blocks]);
+  
   // Update block content
   const updateBlock = (id: string, title: string, content: string) => {
-    setBlocks(blocks.map(block => 
-      block.id === id ? { ...block, title, content } : block
+    setBlocks(prevBlocks => prevBlocks.map(block => 
+      block.id === id ? { 
+        ...block, 
+        title, 
+        content,
+        updatedAt: Date.now() // Add timestamp to force re-render
+      } : block
     ));
+    
+    console.log(`Updated block content: ${id} with title: ${title}`);
+    
+    // Force connection updates when block content changes
+    // Content changes can affect block height which affects connection points
+    setTimeout(() => {
+      forceConnectionUpdate();
+    }, 50);
   };
 
   // Update block format
-  const updateBlockFormat = (id: string, formatUpdates: Partial<TextFormat>) => {
-    setBlocks(blocks.map(block => 
-      block.id === id ? { 
-        ...block, 
-        format: { ...(block.format || defaultTextFormat), ...formatUpdates } 
-      } : block
-    ));
-  };
-
-  // Update block position after drag
-  const updateBlockPosition = (id: string, position: { x: number; y: number }) => {
-    setBlocks(blocks.map(block => 
-      block.id === id ? { ...block, position } : block
-    ));
+  const updateFormat = (property: keyof TextFormat, value: any) => {
+    if (!activeBlockId || !activeEditingField) return;
+    
+    console.log(`Updating format: ${property} -> ${value}`);
+    
+    const updatedBlocks = blocks.map(block => {
+      if (block.id === activeBlockId) {
+        const targetField = activeEditingField === 'title' ? 'titleFormat' : 'format';
+        
+        // Create a new format object or use existing one
+        const currentFormat = 
+          (activeEditingField === 'title' && block.titleFormat) 
+          || (activeEditingField === 'title' ? block.format : block.format) 
+          || { ...defaultTextFormat };
+          
+        const newFormat = { ...currentFormat, [property]: value };
+        
+        // Return updated block with correct format field
+        return activeEditingField === 'title'
+          ? { 
+              ...block, 
+              titleFormat: newFormat,
+              updatedAt: Date.now() // Add timestamp to force refresh
+            }
+          : { 
+              ...block, 
+              format: newFormat,
+              updatedAt: Date.now() // Add timestamp to force refresh
+            };
+      }
+      return block;
+    });
+    
+    // Set updated blocks to trigger re-render
+    setBlocks(updatedBlocks);
+    
+    // Force connection positions to update when text formatting changes
+    // This is needed because text size changes can affect block height
+    setTimeout(() => {
+      forceConnectionUpdate();
+    }, 100);
+    
+    // Save to localStorage
+    setTimeout(() => {
+      saveBlocksToLocalStorage();
+    }, 10);
+    
+    // Re-focus the active text input after toolbar interactions
+    if (activeEditingField === 'title') {
+      setTimeout(() => {
+        const activeElement = document.querySelector(`input[id="title-${activeBlockId}"]`) as HTMLElement;
+        if (activeElement) {
+          activeElement.focus();
+        }
+      }, 10);
+    } else if (activeEditingField === 'content') {
+      setTimeout(() => {
+        const activeElement = document.querySelector(`textarea[id="content-${activeBlockId}"]`) as HTMLElement;
+        if (activeElement) {
+          activeElement.focus();
+        }
+      }, 10);
+    }
   };
 
   // Delete a block
   const deleteBlock = (id: string) => {
     setBlocks(blocks.filter(block => block.id !== id));
     if (activeBlockId === id) {
-      setActiveBlockId(null);
+      setActiveBlock(null, null);
     }
   };
 
   // Set active block for editing
   const setActiveBlock = (id: string | null, editingField: 'title' | 'content' | null = null) => {
     console.log('Setting active block:', id, 'Field:', editingField);
-    setActiveBlockId(id);
-    setActiveEditingField(editingField);
+    
+    // Only update if there's a change to avoid unnecessary re-renders
+    if (id !== activeBlockId || editingField !== activeEditingField) {
+      setActiveBlockId(id);
+      setActiveEditingField(editingField);
+    }
   };
 
   // Get the active block
   const getActiveBlock = () => {
     return blocks.find(block => block.id === activeBlockId);
+  };
+
+  // Get format based on current editing field
+  const getCurrentFormat = () => {
+    const block = getActiveBlock();
+    if (!block) return defaultTextFormat;
+    
+    if (activeEditingField === 'title' && block.titleFormat) {
+      return block.titleFormat;
+    } else if (activeEditingField === 'title') {
+      // If no specific title format yet, use block format or default
+      return block.format || defaultTextFormat;
+    }
+    
+    return block.format || defaultTextFormat;
   };
 
   // Format labels for toolbar title
@@ -184,30 +459,38 @@ const Whiteboard = () => {
       : `Editing content: ${block.title || 'Untitled'}`;
   };
 
-  // Text formatting handlers
-  const updateFormat = (property: keyof TextFormat, value: any) => {
-    if (!activeBlockId) return;
+  // Prevent clicks inside the toolbar from deselecting the text block
+  const handleToolbarClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    console.log("Toolbar click intercepted, activeBlockId:", activeBlockId);
     
-    updateBlockFormat(activeBlockId, {
-      [property]: value
-    });
+    // Ensure we keep the active state
+    if (activeBlockId && !activeEditingField) {
+      // If clicking in toolbar but no field is active, defaulting to content
+      setActiveEditingField('content');
+    }
   };
 
-  // Toggle text formatting buttons (bold, italic, underline, strikethrough)
+  // Toggle formatting function
   const toggleFormatting = (property: keyof TextFormat) => {
-    if (!activeBlockId) return;
+    if (!activeBlockId || !activeEditingField) return;
     
-    const activeBlock = getActiveBlock();
-    if (!activeBlock || !activeBlock.format) return;
+    const currentFormat = getCurrentFormat();
     
+    // Toggle based on property type
     if (property === 'fontWeight') {
-      updateFormat('fontWeight', activeBlock.format.fontWeight === 'bold' ? 'normal' : 'bold');
-    } else if (property === 'fontStyle') {
-      updateFormat('fontStyle', activeBlock.format.fontStyle === 'italic' ? 'normal' : 'italic');
-    } else if (property === 'isUnderlined') {
-      updateFormat('isUnderlined', !activeBlock.format.isUnderlined);
-    } else if (property === 'isStrikethrough') {
-      updateFormat('isStrikethrough', !activeBlock.format.isStrikethrough);
+      const newValue = currentFormat.fontWeight === 'bold' ? 'normal' : 'bold';
+      updateFormat('fontWeight', newValue);
+    } 
+    else if (property === 'fontStyle') {
+      const newValue = currentFormat.fontStyle === 'italic' ? 'normal' : 'italic';
+      updateFormat('fontStyle', newValue);
+    }
+    else if (property === 'isUnderlined') {
+      updateFormat('isUnderlined', !currentFormat.isUnderlined);
+    }
+    else if (property === 'isStrikethrough') {
+      updateFormat('isStrikethrough', !currentFormat.isStrikethrough);
     }
   };
 
@@ -253,7 +536,8 @@ const Whiteboard = () => {
       content: 'this should be the content of your paragraph...',
       position: { x: centerX + 250, y: 250 },
       type: 'text',
-      format: { ...defaultTextFormat }
+      format: { ...defaultTextFormat },
+      titleFormat: { ...defaultTextFormat, fontWeight: 'bold' }
     };
     
     const mainBlock: Block = {
@@ -262,41 +546,444 @@ const Whiteboard = () => {
       content: 'this should be the content of your paragraph...',
       position: { x: centerX, y: 450 },
       type: 'text',
-      format: { ...defaultTextFormat }
+      format: { ...defaultTextFormat },
+      titleFormat: { ...defaultTextFormat, fontWeight: 'bold' }
     };
     
     setBlocks([titleBlock, opening1, opening2, opening3, mainBlock]);
   };
 
+  // Helper function to parse font size
+  const parseFontSize = (fontSize: string): number => {
+    if (!fontSize) return 16;
+    return parseInt(fontSize.replace('px', '')) || 16;
+  };
+
+  // Add this function at an appropriate place in your component
+  const handleFontDropdownClick = (e: React.MouseEvent) => {
+    // Stop propagation to prevent other handlers from firing
+    e.stopPropagation();
+    
+    // Keep the dropdown open when clicking inside it
+    const searchInput = document.querySelector('.font-search-input') as HTMLInputElement;
+    
+    // Only focus the search input if we're not clicking on a font option
+    if (!(e.target as HTMLElement).closest('.font-option')) {
+      // Re-focus the search input
+      setTimeout(() => {
+        if (searchInput) searchInput.focus();
+      }, 0);
+    }
+  };
+
+  // Modified connection handling methods
+  const handleStartConnection = (
+    blockId: string, 
+    pointPosition: ConnectionPointPosition, 
+    position: {x: number, y: number}
+  ) => {
+    setIsCreatingConnection(true);
+    setConnectionStart({
+      blockId,
+      pointPosition,
+      position
+    });
+  };
+  
+  const handleFinishConnection = (targetId: string, targetPoint: ConnectionPointPosition) => {
+    if (connectionStart && connectionStart.blockId !== targetId) {
+      // Create a new connection
+      const newConnection: Connection = {
+        id: `connection-${Date.now()}`,
+        sourceId: connectionStart.blockId,
+        targetId: targetId,
+        sourcePoint: connectionStart.pointPosition,
+        targetPoint: targetPoint,
+        type: 'straight',
+        color: '#3b82f6' // Default blue color
+      };
+      
+      setConnections(prev => [...prev, newConnection]);
+    }
+    
+    // Reset connection creation state
+    setIsCreatingConnection(false);
+    setConnectionStart(null);
+    setNearestPoint(null);
+  };
+  
+  const handleCancelConnection = () => {
+    setIsCreatingConnection(false);
+    setConnectionStart(null);
+    setNearestPoint(null);
+  };
+  
+  const handleRemoveConnection = (connectionId: string) => {
+    setConnections(prev => prev.filter(conn => conn.id !== connectionId));
+  };
+  
+  // Function to check if a block has a connection at a specific point
+  const hasConnectionAtPoint = (blockId: string, pointPosition: ConnectionPointPosition) => {
+    return connections.some(
+      conn => 
+        (conn.sourceId === blockId && conn.sourcePoint === pointPosition) ||
+        (conn.targetId === blockId && conn.targetPoint === pointPosition)
+    );
+  };
+  
+  // Get all connection points for a specific block
+  const getActiveConnectionsForBlock = (blockId: string): ConnectionPointPosition[] => {
+    const activePoints: ConnectionPointPosition[] = [];
+    
+    connections.forEach(conn => {
+      if (conn.sourceId === blockId) {
+        activePoints.push(conn.sourcePoint);
+      }
+      if (conn.targetId === blockId) {
+        activePoints.push(conn.targetPoint);
+      }
+    });
+    
+    return activePoints;
+  };
+  
+  // Calculate the position of a connection point on a block
+  const getConnectionPointPosition = (
+    block: Block, 
+    pointPosition: ConnectionPointPosition
+  ): {x: number, y: number} => {
+    // Get the DOM element for this block to get its actual dimensions
+    const blockElement = document.getElementById(`block-${block.id}`);
+    
+    if (!blockElement) {
+      // Fallback to calculated values if element not found
+      const blockWidth = 320; // Default width
+      const blockHeight = 150; // Default height
+      
+      switch (pointPosition) {
+        case 'top':
+          return { x: block.position.x + blockWidth / 2, y: block.position.y };
+        case 'right':
+          return { x: block.position.x + blockWidth, y: block.position.y + blockHeight / 2 };
+        case 'bottom':
+          return { x: block.position.x + blockWidth / 2, y: block.position.y + blockHeight };
+        case 'left':
+          return { x: block.position.x, y: block.position.y + blockHeight / 2 };
+        default:
+          return { x: 0, y: 0 };
+      }
+    }
+    
+    // If we have the element, get precise measurements
+    const rect = blockElement.getBoundingClientRect();
+    const blockWidth = rect.width || 320;
+    const blockHeight = rect.height || 150;
+    
+    // Use offsetParent to account for scrolling
+    const containerRect = containerRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
+    
+    switch (pointPosition) {
+      case 'top':
+        return { 
+          x: block.position.x + blockWidth / 2,
+          y: block.position.y
+        };
+      case 'right':
+        return { 
+          x: block.position.x + blockWidth,
+          y: block.position.y + blockHeight / 2
+        };
+      case 'bottom':
+        return { 
+          x: block.position.x + blockWidth / 2,
+          y: block.position.y + blockHeight
+        };
+      case 'left':
+        return { 
+          x: block.position.x,
+          y: block.position.y + blockHeight / 2
+        };
+      default:
+        return { x: 0, y: 0 };
+    }
+  };
+  
+  // Updated function to track mouse movement for dynamic connection line with snapping
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (isCreatingConnection && connectionStart) {
+      // Get the cursor position relative to the whiteboard
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect) {
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        setCursorPosition({x, y});
+        
+        // Find the nearest connection point to snap to
+        let minDistance = Number.MAX_VALUE;
+        let closestPoint = null;
+        
+        blocks.forEach(block => {
+          if (block.id === connectionStart.blockId) return; // Skip source block
+          
+          // For each block, get precise connection points
+          const blockElement = document.getElementById(`block-${block.id}`);
+          if (!blockElement) return; // Skip if element not found
+          
+          const rect = blockElement.getBoundingClientRect();
+          const blockWidth = rect.width;
+          const blockHeight = rect.height;
+          
+          // Check each connection point on other blocks
+          const connectionPoints: { position: ConnectionPointPosition, x: number, y: number }[] = [
+            { position: 'top', x: block.position.x + blockWidth / 2, y: block.position.y },
+            { position: 'right', x: block.position.x + blockWidth, y: block.position.y + blockHeight / 2 },
+            { position: 'bottom', x: block.position.x + blockWidth / 2, y: block.position.y + blockHeight },
+            { position: 'left', x: block.position.x, y: block.position.y + blockHeight / 2 }
+          ];
+          
+          connectionPoints.forEach(point => {
+            const distance = Math.sqrt(
+              Math.pow(point.x - x, 2) + Math.pow(point.y - y, 2)
+            );
+            
+            // If this point is closer than our current minimum and within snap range (50px)
+            if (distance < minDistance && distance < 50) {
+              minDistance = distance;
+              closestPoint = {
+                blockId: block.id,
+                pointPosition: point.position,
+                position: { x: point.x, y: point.y },
+                distance: distance
+              };
+            }
+          });
+        });
+        
+        setNearestPoint(closestPoint);
+      }
+    }
+  };
+  
+  // Render connections between blocks
+  const renderConnections = () => {
+    return connections.map(connection => {
+      // Find the source and target blocks
+      const sourceBlock = blocks.find(block => block.id === connection.sourceId);
+      const targetBlock = blocks.find(block => block.id === connection.targetId);
+      
+      if (!sourceBlock || !targetBlock) {
+        // If blocks are not found, don't render the connection
+        return null;
+      }
+      
+      // Calculate precise positions based on connection points
+      const sourcePos = getConnectionPointPosition(sourceBlock, connection.sourcePoint);
+      const targetPos = getConnectionPointPosition(targetBlock, connection.targetPoint);
+      
+      // For a straight line with an arrow
+      const id = connection.id;
+      
+      // Calculate the offset for the arrowhead to make it stop precisely at the connection point
+      // This prevents the arrow from overlapping the connection point
+      const dx = targetPos.x - sourcePos.x;
+      const dy = targetPos.y - sourcePos.y;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      const arrowLength = 10; // Length of the arrowhead
+      
+      // Calculate end point that's slightly before the target to account for arrowhead
+      const endX = length === 0 ? targetPos.x : targetPos.x - (dx * arrowLength / length);
+      const endY = length === 0 ? targetPos.y : targetPos.y - (dy * arrowLength / length);
+      
+      return (
+        <g key={id}>
+          {/* Connection line */}
+          <line
+            x1={sourcePos.x}
+            y1={sourcePos.y}
+            x2={endX}
+            y2={endY}
+            stroke={connection.color || '#3b82f6'}
+            strokeWidth={2}
+            markerEnd="url(#arrowhead)"
+          />
+          
+          {/* Click area for easier selection */}
+          <line
+            x1={sourcePos.x}
+            y1={sourcePos.y}
+            x2={targetPos.x}
+            y2={targetPos.y}
+            stroke="transparent"
+            strokeWidth={10}
+            onClick={() => handleRemoveConnection(id)}
+            style={{ cursor: 'pointer' }}
+          />
+        </g>
+      );
+    });
+  };
+  
+  // Add this function to the Whiteboard component to help with ID generation
+  const getBlockId = (id: string) => `block-${id}`;
+  const getConnectionPointId = (blockId: string, position: ConnectionPointPosition) => `connection-point-${blockId}-${position}`;
+
+  // Render the temporary connection line while creating
+  const renderTemporaryConnection = () => {
+    if (isCreatingConnection && connectionStart) {
+      // If there's a nearest point to snap to, use that; otherwise use cursor position
+      const endPoint = nearestPoint 
+        ? nearestPoint.position
+        : cursorPosition;
+      
+      // Use the exact start position from the connection start data
+      const startX = connectionStart.position.x;
+      const startY = connectionStart.position.y;
+      
+      // If we have a nearest point, calculate the arrow offset like with permanent connections
+      if (nearestPoint) {
+        const dx = endPoint.x - startX;
+        const dy = endPoint.y - startY;
+        const length = Math.sqrt(dx * dx + dy * dy);
+        const arrowLength = 10; // Same as for permanent connections
+        
+        // Adjust the end point to leave space for the arrowhead
+        const adjustedEndX = length === 0 ? endPoint.x : endPoint.x - (dx * arrowLength / length);
+        const adjustedEndY = length === 0 ? endPoint.y : endPoint.y - (dy * arrowLength / length);
+        
+        return (
+          <line
+            x1={startX}
+            y1={startY}
+            x2={adjustedEndX}
+            y2={adjustedEndY}
+            stroke="#3b82f6"
+            strokeWidth={2}
+            strokeDasharray="0" // Solid line when snapping
+            markerEnd="url(#arrowhead)"
+          />
+        );
+      }
+      
+      // If not snapping, show a dashed line to cursor
+      return (
+        <line
+          x1={startX}
+          y1={startY}
+          x2={endPoint.x}
+          y2={endPoint.y}
+          stroke="#3b82f6"
+          strokeWidth={2}
+          strokeDasharray="5,5" // Dashed line when not snapping
+        />
+      );
+    }
+    return null;
+  };
+  
+  // Add the arrowhead definition for connections
+  const renderSvgDefs = () => {
+    return (
+      <defs>
+        <marker
+          id="arrowhead"
+          markerWidth="10"
+          markerHeight="7"
+          refX="0"
+          refY="3.5"
+          orient="auto"
+        >
+          <polygon points="0 0, 10 3.5, 0 7" fill="#3b82f6" />
+        </marker>
+      </defs>
+    );
+  };
+
+  // Add this function to force connection updates when blocks change
+  const forceConnectionUpdate = () => {
+    // This triggers a re-render of connections without changing them
+    if (connections.length > 0) {
+      setConnections(prev => [...prev.map(conn => ({...conn, timestamp: Date.now()}))]);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Text Formatting Toolbar - Always visible but disabled when no block is active */}
-      <div className="sticky top-0 z-50 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm">
-        <div className="container mx-auto px-2 py-1">
-          <div className="flex items-center h-10 gap-2 overflow-x-auto">
-            {/* Font Family Dropdown - Styled like Canva */}
-            <div className="flex-shrink-0">
-              <select 
-                value={getActiveBlock()?.format?.fontFamily || defaultTextFormat.fontFamily}
-                onChange={(e) => updateFormat('fontFamily', e.target.value)}
-                className={`h-8 px-2 py-0 text-sm font-medium border border-gray-200 rounded-md bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : ''}`}
+      <div 
+        className="sticky top-0 z-50 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm toolbar-container"
+        onClick={handleToolbarClick}
+        data-toolbar="true"
+      >
+        <div className="container mx-auto px-2 py-1" onClick={handleToolbarClick}>
+          <div className="flex items-center h-10 gap-2 overflow-x-auto" onClick={handleToolbarClick}>
+            {/* New Font Family Selector Button */}
+            <div className="flex-shrink-0 relative">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!activeBlockId || !activeEditingField) return;
+                  setFontDropdownOpen(!fontDropdownOpen);
+                  setFontSearchValue('');
+                }}
+                className={`font-selector-button h-8 px-3 py-0 text-sm font-medium border border-gray-200 rounded-md bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 flex items-center justify-between min-w-[130px] ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-50 dark:hover:bg-gray-700'}`}
                 disabled={!activeBlockId || !activeEditingField}
+                tabIndex={activeBlockId && activeEditingField ? 0 : -1}
               >
-                {fontFamilies.map(font => (
-                  <option key={font.value} value={font.value}>{font.name}</option>
-                ))}
-              </select>
+                <span style={{ fontFamily: getCurrentFormat().fontFamily }}>
+                  {fontOptions.find(f => f.value === getCurrentFormat().fontFamily)?.name || 'Arial'}
+                </span>
+                <span className="ml-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </span>
+              </button>
             </div>
+
+            {/* Font Dropdown */}
+            {fontDropdownOpen && (
+              <div 
+                className="absolute top-10 left-0 mt-1 w-64 max-h-72 bg-white rounded-lg shadow-xl z-50 overflow-hidden border border-gray-200 font-dropdown"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="p-2 bg-white">
+                  <div className="max-h-64 overflow-y-auto">
+                    <div className="grid grid-cols-1 gap-1">
+                      {fontOptions.map(font => (
+                        <button
+                          key={font.value}
+                          className={`text-left px-3 py-2.5 rounded text-gray-800 hover:bg-gray-100 flex justify-between items-center font-option ${getCurrentFormat().fontFamily === font.value ? 'bg-blue-50' : ''}`}
+                          style={{ fontFamily: font.value }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            updateFormat('fontFamily', font.value);
+                            setFontDropdownOpen(false);
+                          }}
+                        >
+                          <span className="text-md">{font.name}</span>
+                          {getCurrentFormat().fontFamily === font.value && (
+                            <svg className="h-5 w-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Separator */}
             <div className="h-6 w-px bg-gray-300 dark:bg-gray-600 mx-1"></div>
 
-            {/* Font Size - Styled like Canva */}
-            <div className={`flex items-center h-8 rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden ${!activeBlockId || !activeEditingField ? 'opacity-50' : ''}`}>
+            {/* Font Size Control - Rebuild completely */}
+            <div className={`flex items-center h-8 rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden ${!activeBlockId || !activeEditingField ? 'opacity-50 pointer-events-none' : ''}`}>
               <button 
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   if (!activeBlockId || !activeEditingField) return;
-                  const currentSize = parseInt(getActiveBlock()?.format?.fontSize || '16');
+                  const currentSize = parseFontSize(getCurrentFormat().fontSize);
                   if (currentSize > 8) {
                     updateFormat('fontSize', `${currentSize - 2}px`);
                   }
@@ -304,31 +991,39 @@ const Whiteboard = () => {
                 className="flex items-center justify-center w-8 h-full text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 border-r border-gray-200 dark:border-gray-700"
                 title="Decrease font size"
                 disabled={!activeBlockId || !activeEditingField}
+                tabIndex={activeBlockId && activeEditingField ? 0 : -1}
               >
                 <span className="text-lg font-bold">−</span>
               </button>
-              <input
-                type="text"
-                value={parseInt(getActiveBlock()?.format?.fontSize || '16')}
-                onChange={(e) => {
-                  if (!activeBlockId || !activeEditingField) return;
-                  const value = parseInt(e.target.value);
-                  if (!isNaN(value) && value > 0) {
-                    updateFormat('fontSize', `${value}px`);
-                  }
-                }}
-                className="w-12 h-full text-center bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 focus:outline-none"
-                disabled={!activeBlockId || !activeEditingField}
-              />
+              <div className="w-12 h-full relative">
+                <input
+                  type="text"
+                  value={parseFontSize(getCurrentFormat().fontSize)}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    if (!activeBlockId || !activeEditingField) return;
+                    const value = parseInt(e.target.value);
+                    if (!isNaN(value) && value > 0) {
+                      updateFormat('fontSize', `${value}px`);
+                    }
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="w-full h-full text-center bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 focus:outline-none"
+                  disabled={!activeBlockId || !activeEditingField}
+                  tabIndex={activeBlockId && activeEditingField ? 0 : -1}
+                />
+              </div>
               <button 
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   if (!activeBlockId || !activeEditingField) return;
-                  const currentSize = parseInt(getActiveBlock()?.format?.fontSize || '16');
+                  const currentSize = parseFontSize(getCurrentFormat().fontSize);
                   updateFormat('fontSize', `${currentSize + 2}px`);
                 }}
                 className="flex items-center justify-center w-8 h-full text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 border-l border-gray-200 dark:border-gray-700"
                 title="Increase font size"
                 disabled={!activeBlockId || !activeEditingField}
+                tabIndex={activeBlockId && activeEditingField ? 0 : -1}
               >
                 <span className="text-lg font-bold">+</span>
               </button>
@@ -337,86 +1032,71 @@ const Whiteboard = () => {
             {/* Separator */}
             <div className="h-6 w-px bg-gray-300 dark:bg-gray-600 mx-1"></div>
 
-            {/* Text Color */}
-            <div className={`relative group flex-shrink-0 ${!activeBlockId || !activeEditingField ? 'pointer-events-none opacity-50' : ''}`}>
+            {/* Text Color Button and Dropdown */}
+            <div className="flex-shrink-0 relative">
               <button
-                className="flex items-center justify-center w-8 h-8 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
-                title="Text color"
-                style={{ color: getActiveBlock()?.format?.textColor || defaultTextFormat.textColor }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!activeBlockId || !activeEditingField) return;
+                  setTextColorDropdownOpen(!textColorDropdownOpen);
+                  setBgColorDropdownOpen(false); // Close the other dropdown
+                }}
+                className={`h-8 px-3 py-0 text-sm font-medium border border-gray-200 rounded-md bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 flex items-center justify-between min-w-[100px] ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-50 dark:hover:bg-gray-700'}`}
                 disabled={!activeBlockId || !activeEditingField}
+                tabIndex={activeBlockId && activeEditingField ? 0 : -1}
               >
-                <span className="material-icons text-xl">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 7l6 0"></path><path d="M12 7v7"></path><path d="M11 19l2 0"></path>
+                <div className="flex items-center gap-2">
+                  <div 
+                    className="w-4 h-4 rounded border border-gray-300" 
+                    style={{ backgroundColor: getCurrentFormat().textColor || '#000000' }}
+                  ></div>
+                  <span>Text</span>
+                </div>
+                <span>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </span>
-                <div className="absolute -bottom-0.5 left-1/2 transform -translate-x-1/2 w-4 h-1 rounded" style={{ backgroundColor: getActiveBlock()?.format?.textColor || defaultTextFormat.textColor }}></div>
               </button>
-              {activeBlockId && activeEditingField && (
-                <div className="absolute hidden group-hover:block top-full left-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg p-2 z-10">
-                  <div className="grid grid-cols-4 gap-1">
-                    {colorOptions.map(color => (
-                      <div
-                        key={color.value}
-                        onClick={() => updateFormat('textColor', color.value)}
-                        className="w-6 h-6 rounded-full cursor-pointer hover:scale-110 transition-transform"
-                        style={{ backgroundColor: color.value }}
-                        title={color.name}
-                      ></div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
 
-            {/* Background Color */}
-            <div className={`relative group flex-shrink-0 ${!activeBlockId || !activeEditingField ? 'pointer-events-none opacity-50' : ''}`}>
+            {/* Background Color Button and Dropdown */}
+            <div className="flex-shrink-0 relative">
               <button
-                className="flex items-center justify-center w-8 h-8 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
-                title="Background color"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!activeBlockId || !activeEditingField) return;
+                  setBgColorDropdownOpen(!bgColorDropdownOpen);
+                  setTextColorDropdownOpen(false); // Close the other dropdown
+                }}
+                className={`h-8 px-3 py-0 text-sm font-medium border border-gray-200 rounded-md bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 flex items-center justify-between min-w-[100px] ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-50 dark:hover:bg-gray-700'}`}
                 disabled={!activeBlockId || !activeEditingField}
+                tabIndex={activeBlockId && activeEditingField ? 0 : -1}
               >
-                <span className="material-icons text-xl">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M6.5 3H3c-.5 0-1 .5-1 1v3.5L16.5 22c.5.5 1.5.5 2 0l3-3c.5-.5.5-1.5 0-2L7 3.5Z"></path>
-                    <path d="M2 13.5V20c0 .5.5 1 1 1h6.5L2 13.5Z"></path>
+                <div className="flex items-center gap-2">
+                  <div 
+                    className="w-4 h-4 rounded border border-gray-300 relative" 
+                    style={{ 
+                      backgroundColor: getCurrentFormat().backgroundColor !== 'transparent' 
+                        ? getCurrentFormat().backgroundColor 
+                        : 'transparent',
+                      position: 'relative'
+                    }}
+                  >
+                    {getCurrentFormat().backgroundColor === 'transparent' && (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="w-full h-0.5 bg-red-500 rotate-45 transform" />
+                      </div>
+                    )}
+                  </div>
+                  <span>Background</span>
+                </div>
+                <span>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </span>
-                <div 
-                  className="absolute -bottom-0.5 left-1/2 transform -translate-x-1/2 w-4 h-1 rounded"
-                  style={{ 
-                    backgroundColor: getActiveBlock()?.format?.backgroundColor !== 'transparent' 
-                      ? getActiveBlock()?.format?.backgroundColor 
-                      : '#cccccc' 
-                  }}
-                ></div>
               </button>
-              {activeBlockId && activeEditingField && (
-                <div className="absolute hidden group-hover:block top-full left-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg p-2 z-10">
-                  <div className="grid grid-cols-4 gap-1">
-                    <div
-                      onClick={() => updateFormat('backgroundColor', 'transparent')}
-                      className="w-6 h-6 rounded-full cursor-pointer hover:scale-110 transition-transform bg-white border border-gray-300 relative"
-                      title="No Background"
-                    >
-                      <div className="absolute inset-0 flex items-center justify-center text-red-500">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <line x1="5" y1="5" x2="19" y2="19"></line>
-                        </svg>
-                      </div>
-                    </div>
-                    {colorOptions.map(color => (
-                      <div
-                        key={color.value}
-                        onClick={() => updateFormat('backgroundColor', color.value)}
-                        className="w-6 h-6 rounded-full cursor-pointer hover:scale-110 transition-transform"
-                        style={{ backgroundColor: color.value }}
-                        title={color.name}
-                      ></div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Separator */}
@@ -428,9 +1108,10 @@ const Whiteboard = () => {
                 if (!activeBlockId || !activeEditingField) return;
                 toggleFormatting('fontWeight');
               }} 
-              className={`flex items-center justify-center w-8 h-8 rounded-md ${getActiveBlock()?.format?.fontWeight === 'bold' ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-700'} ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`flex items-center justify-center w-8 h-8 rounded-md ${getCurrentFormat().fontWeight === 'bold' ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-700'} ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : ''}`}
               title="Bold"
               disabled={!activeBlockId || !activeEditingField}
+              tabIndex={activeBlockId && activeEditingField ? 0 : -1}
             >
               <span className="material-icons text-xl font-bold">B</span>
             </button>
@@ -440,9 +1121,10 @@ const Whiteboard = () => {
                 if (!activeBlockId || !activeEditingField) return;
                 toggleFormatting('fontStyle');
               }} 
-              className={`flex items-center justify-center w-8 h-8 rounded-md ${getActiveBlock()?.format?.fontStyle === 'italic' ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-700'} ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`flex items-center justify-center w-8 h-8 rounded-md ${getCurrentFormat().fontStyle === 'italic' ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-700'} ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : ''}`}
               title="Italic"
               disabled={!activeBlockId || !activeEditingField}
+              tabIndex={activeBlockId && activeEditingField ? 0 : -1}
             >
               <span className="material-icons text-xl italic">I</span>
             </button>
@@ -452,9 +1134,10 @@ const Whiteboard = () => {
                 if (!activeBlockId || !activeEditingField) return;
                 toggleFormatting('isUnderlined');
               }} 
-              className={`flex items-center justify-center w-8 h-8 rounded-md ${getActiveBlock()?.format?.isUnderlined ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-700'} ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`flex items-center justify-center w-8 h-8 rounded-md ${getCurrentFormat().isUnderlined ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-700'} ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : ''}`}
               title="Underline"
               disabled={!activeBlockId || !activeEditingField}
+              tabIndex={activeBlockId && activeEditingField ? 0 : -1}
             >
               <span className="material-icons text-xl underline">U</span>
             </button>
@@ -464,9 +1147,10 @@ const Whiteboard = () => {
                 if (!activeBlockId || !activeEditingField) return;
                 toggleFormatting('isStrikethrough');
               }} 
-              className={`flex items-center justify-center w-8 h-8 rounded-md ${getActiveBlock()?.format?.isStrikethrough ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-700'} ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`flex items-center justify-center w-8 h-8 rounded-md ${getCurrentFormat().isStrikethrough ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-700'} ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : ''}`}
               title="Strikethrough"
               disabled={!activeBlockId || !activeEditingField}
+              tabIndex={activeBlockId && activeEditingField ? 0 : -1}
             >
               <span className="material-icons text-xl line-through">S</span>
             </button>
@@ -480,9 +1164,10 @@ const Whiteboard = () => {
                 if (!activeBlockId || !activeEditingField) return;
                 updateFormat('textAlign', 'left');
               }} 
-              className={`flex items-center justify-center w-8 h-8 rounded-md ${getActiveBlock()?.format?.textAlign === 'left' ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-700'} ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`flex items-center justify-center w-8 h-8 rounded-md ${getCurrentFormat().textAlign === 'left' ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-700'} ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : ''}`}
               title="Align Left"
               disabled={!activeBlockId || !activeEditingField}
+              tabIndex={activeBlockId && activeEditingField ? 0 : -1}
             >
               <span className="material-icons text-xl">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -498,9 +1183,10 @@ const Whiteboard = () => {
                 if (!activeBlockId || !activeEditingField) return;
                 updateFormat('textAlign', 'center');
               }} 
-              className={`flex items-center justify-center w-8 h-8 rounded-md ${getActiveBlock()?.format?.textAlign === 'center' ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-700'} ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`flex items-center justify-center w-8 h-8 rounded-md ${getCurrentFormat().textAlign === 'center' ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-700'} ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : ''}`}
               title="Align Center"
               disabled={!activeBlockId || !activeEditingField}
+              tabIndex={activeBlockId && activeEditingField ? 0 : -1}
             >
               <span className="material-icons text-xl">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -516,9 +1202,10 @@ const Whiteboard = () => {
                 if (!activeBlockId || !activeEditingField) return;
                 updateFormat('textAlign', 'right');
               }} 
-              className={`flex items-center justify-center w-8 h-8 rounded-md ${getActiveBlock()?.format?.textAlign === 'right' ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-700'} ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`flex items-center justify-center w-8 h-8 rounded-md ${getCurrentFormat().textAlign === 'right' ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-700'} ${!activeBlockId || !activeEditingField ? 'opacity-50 cursor-not-allowed' : ''}`}
               title="Align Right"
               disabled={!activeBlockId || !activeEditingField}
+              tabIndex={activeBlockId && activeEditingField ? 0 : -1}
             >
               <span className="material-icons text-xl">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -556,11 +1243,42 @@ const Whiteboard = () => {
         ref={containerRef}
         className="flex-grow relative overflow-auto bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800"
         style={{ height: '100vh', position: 'relative' }}
-        onClick={() => setActiveBlock(null, null)}
+        onClick={(e) => {
+          // Don't deselect if clicking inside toolbar
+          const toolbarElement = document.querySelector('.toolbar-container');
+          if (toolbarElement && toolbarElement.contains(e.target as Node)) {
+            e.stopPropagation();
+            console.log("Click in toolbar detected - keeping active state");
+            return;
+          }
+          
+          // Cancel connection creation if clicking on empty space
+          if (isCreatingConnection) {
+            handleCancelConnection();
+            return;
+          }
+          
+          // Otherwise deselect
+          console.log("Setting active block to null");
+          setActiveBlock(null, null);
+        }}
+        onMouseMove={handleMouseMove}
       >
+        {/* Connection lines SVG layer with arrowhead definitions */}
+        <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
+          {renderSvgDefs()}
+          {renderConnections()}
+          
+          {/* Show connection in progress */}
+          {isCreatingConnection && connectionStart && renderTemporaryConnection()}
+        </svg>
+
         {/* Blocks */}
         {blocks.map((block) => {
           if (block.type === 'text') {
+            // Get active connections for this block
+            const activeConnections = getActiveConnectionsForBlock(block.id);
+            
             return (
               <TextBlock
                 key={block.id}
@@ -569,11 +1287,17 @@ const Whiteboard = () => {
                 content={block.content}
                 position={block.position}
                 format={block.format || defaultTextFormat}
+                titleFormat={block.titleFormat || block.format || defaultTextFormat}
                 onUpdate={updateBlock}
                 onDelete={deleteBlock}
                 onPositionChange={updateBlockPosition}
                 onActivate={setActiveBlock}
                 isActive={activeBlockId === block.id}
+                onStartConnection={handleStartConnection}
+                onFinishConnection={handleFinishConnection}
+                isCreatingConnection={isCreatingConnection}
+                isConnectionSource={connectionStart?.blockId === block.id}
+                activeConnections={activeConnections}
               />
             );
           }
@@ -644,16 +1368,106 @@ const Whiteboard = () => {
             </button>
           </div>
         </div>
-        
-        {/* Debug info - only visible in development */}
-        {process.env.NODE_ENV === 'development' && (
-          <div className="fixed top-2 right-2 bg-black/70 text-white p-2 text-sm rounded opacity-70 z-50">
-            <p>Blocks: {blocks.length}</p>
-            <p>Window: {windowDimensions.width}x{windowDimensions.height}</p>
-            <p>Container: {containerRef.current ? `${containerRef.current.clientWidth}x${containerRef.current.clientHeight}` : 'No ref'}</p>
-          </div>
-        )}
       </div>
+
+      {/* Text Color Popup Modal */}
+      {textColorDropdownOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-20" onClick={() => setTextColorDropdownOpen(false)}>
+          <div 
+            className="text-color-modal bg-white rounded-lg shadow-xl p-4 w-64 max-h-[400px] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-medium text-gray-900">Text Color</h3>
+              <button
+                onClick={() => setTextColorDropdownOpen(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-4 gap-3">
+              {colorOptions.map(color => (
+                <div
+                  key={color.value}
+                  onClick={() => {
+                    updateFormat('textColor', color.value);
+                    setTextColorDropdownOpen(false);
+                  }}
+                  className="w-10 h-10 rounded-md cursor-pointer hover:scale-110 transition-transform border border-gray-200 flex items-center justify-center"
+                  style={{ backgroundColor: color.value }}
+                  title={color.name}
+                >
+                  {getCurrentFormat().textColor === color.value && (
+                    <svg className={`h-6 w-6 ${color.value === '#ffffff' || color.value === '#ffff00' || color.value === '#00ffff' || color.value === '#00ff00' ? 'text-black' : 'text-white'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Background Color Popup Modal */}
+      {bgColorDropdownOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-20" onClick={() => setBgColorDropdownOpen(false)}>
+          <div 
+            className="bg-color-modal bg-white rounded-lg shadow-xl p-4 w-64 max-h-[400px] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-medium text-gray-900">Background Color</h3>
+              <button
+                onClick={() => setBgColorDropdownOpen(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            <div 
+              onClick={() => {
+                updateFormat('backgroundColor', 'transparent');
+                setBgColorDropdownOpen(false);
+              }}
+              className="flex items-center gap-2 p-2 mb-3 rounded hover:bg-gray-100 cursor-pointer"
+            >
+              <div className="w-8 h-8 border border-gray-300 rounded relative flex items-center justify-center">
+                <div className="w-full h-0.5 bg-red-500 rotate-45 transform absolute" />
+              </div>
+              <span>Transparent</span>
+            </div>
+            
+            <div className="grid grid-cols-4 gap-3">
+              {colorOptions.map(color => (
+                <div
+                  key={color.value}
+                  onClick={() => {
+                    updateFormat('backgroundColor', color.value);
+                    setBgColorDropdownOpen(false);
+                  }}
+                  className="w-10 h-10 rounded-md cursor-pointer hover:scale-110 transition-transform border border-gray-200 flex items-center justify-center"
+                  style={{ backgroundColor: color.value }}
+                  title={color.name}
+                >
+                  {getCurrentFormat().backgroundColor === color.value && (
+                    <svg className={`h-6 w-6 ${color.value === '#ffffff' || color.value === '#ffff00' || color.value === '#00ffff' || color.value === '#00ff00' ? 'text-black' : 'text-white'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

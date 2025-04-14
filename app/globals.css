@@ -24,3 +24,123 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Connection Points */
+.connection-point {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background-color: #ffffff;
+  border: 2px solid #3b82f6;
+  border-radius: 50%;
+  cursor: pointer;
+  z-index: 10;
+  transform: translate(-50%, -50%);
+  transition: all 0.2s ease;
+}
+
+.connection-point:hover {
+  transform: translate(-50%, -50%) scale(1.2);
+  background-color: #93c5fd;
+}
+
+.connection-point.active {
+  background-color: #2563eb;
+  border-color: #ffffff;
+}
+
+.connection-point.highlighted {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
+}
+
+/* Top connection point */
+.connection-point.top {
+  top: 0;
+  left: 50%;
+}
+
+/* Right connection point */
+.connection-point.right {
+  top: 50%;
+  right: 0;
+  transform: translate(50%, -50%);
+}
+.connection-point.right:hover {
+  transform: translate(50%, -50%) scale(1.2);
+}
+
+/* Bottom connection point */
+.connection-point.bottom {
+  bottom: 0;
+  left: 50%;
+  transform: translate(-50%, 50%);
+}
+.connection-point.bottom:hover {
+  transform: translate(-50%, 50%) scale(1.2);
+}
+
+/* Left connection point */
+.connection-point.left {
+  top: 50%;
+  left: 0;
+  transform: translate(-50%, -50%);
+}
+
+/* Connection creation cursor */
+.creating-connection {
+  cursor: crosshair;
+}
+
+/* Connection line styles */
+.connection-line {
+  stroke: #3b82f6;
+  stroke-width: 2;
+  fill: none;
+}
+
+.connection-line:hover {
+  stroke-width: 3;
+  stroke: #2563eb;
+}
+
+.connection-line.dashed {
+  stroke-dasharray: 5, 5;
+}
+
+/* Snapping indicator */
+.snap-indicator {
+  stroke: #10b981;
+  fill: #10b981;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+  100% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+}
+
+/* Connection wrapper to ensure all connections are contained */
+.connections-wrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Connection handles should receive pointer events */
+.connections-wrapper .connection-point {
+  pointer-events: auto;
+}
