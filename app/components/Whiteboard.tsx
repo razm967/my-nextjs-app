@@ -83,14 +83,6 @@ const Whiteboard = () => {
   const [highlightedFlow, setHighlightedFlow] = useState<string[]>([]);
   const [isFlowHighlighted, setIsFlowHighlighted] = useState(false);
   
-  // Add zoom and pan state
-  const [scale, setScale] = useState(1);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [isPanning, setIsPanning] = useState(false);
-  const [startPanPosition, setStartPanPosition] = useState({ x: 0, y: 0 });
-  const [isMiddleMouseDown, setIsMiddleMouseDown] = useState(false);
-  const [isShiftDown, setIsShiftDown] = useState(false);
-  
   // Default text format
   const defaultTextFormat: TextFormat = {
     fontFamily: 'Arial, sans-serif',
@@ -693,11 +685,12 @@ const Whiteboard = () => {
     }
     
     // If we have the element, get precise measurements
-    // Note: we get dimensions from the element to account for dynamic sizing,
-    // but we must use the block.position values which are in unscaled coordinates
     const rect = blockElement.getBoundingClientRect();
-    const blockWidth = rect.width / scale; // Adjust for zoom scale
-    const blockHeight = rect.height / scale; // Adjust for zoom scale
+    const blockWidth = rect.width || 320;
+    const blockHeight = rect.height || 150;
+    
+    // Use offsetParent to account for scrolling
+    const containerRect = containerRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
     
     switch (pointPosition) {
       case 'top':
@@ -727,13 +720,12 @@ const Whiteboard = () => {
   
   // Updated function to track mouse movement for dynamic connection line with snapping
   const handleMouseMove = (e: React.MouseEvent) => {
-    // Handle connection creation
     if (isCreatingConnection && connectionStart) {
-      // Get the cursor position relative to the whiteboard with zoom and pan adjustments
+      // Get the cursor position relative to the whiteboard
       const rect = containerRef.current?.getBoundingClientRect();
       if (rect) {
-        const x = (e.clientX - rect.left - position.x) / scale;
-        const y = (e.clientY - rect.top - position.y) / scale;
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
         setCursorPosition({x, y});
         
         // Find the nearest connection point to snap to
@@ -743,13 +735,13 @@ const Whiteboard = () => {
         blocks.forEach(block => {
           if (block.id === connectionStart.blockId) return; // Skip source block
           
-          // For each block, get precise connection points with zoom adjustments
+          // For each block, get precise connection points
           const blockElement = document.getElementById(`block-${block.id}`);
           if (!blockElement) return; // Skip if element not found
           
           const rect = blockElement.getBoundingClientRect();
-          const blockWidth = rect.width / scale;
-          const blockHeight = rect.height / scale;
+          const blockWidth = rect.width;
+          const blockHeight = rect.height;
           
           // Check each connection point on other blocks
           const connectionPoints: { position: ConnectionPointPosition, x: number, y: number }[] = [
@@ -764,8 +756,8 @@ const Whiteboard = () => {
               Math.pow(point.x - x, 2) + Math.pow(point.y - y, 2)
             );
             
-            // If this point is closer than our current minimum and within snap range (50px / scale)
-            if (distance < minDistance && distance < 50 / scale) {
+            // If this point is closer than our current minimum and within snap range (50px)
+            if (distance < minDistance && distance < 50) {
               minDistance = distance;
               closestPoint = {
                 blockId: block.id,
@@ -780,64 +772,7 @@ const Whiteboard = () => {
         setNearestPoint(closestPoint);
       }
     }
-    
-    // Handle panning with middle mouse or shift+mouse
-    if (isPanning) {
-      setPosition({
-        x: e.clientX - startPanPosition.x,
-        y: e.clientY - startPanPosition.y
-      });
-    }
   };
-  
-  // Track key events for shift key
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Shift') {
-        setIsShiftDown(true);
-        
-        // Change cursor to grabbing if already pressing middle mouse button
-        if (isMiddleMouseDown && containerRef.current) {
-          containerRef.current.style.cursor = 'grabbing';
-        } else if (containerRef.current) {
-          containerRef.current.style.cursor = 'grab';
-        }
-      }
-    };
-    
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'Shift') {
-        setIsShiftDown(false);
-        
-        // Reset cursor unless middle mouse button is still pressed
-        if (!isMiddleMouseDown && containerRef.current) {
-          containerRef.current.style.cursor = 'default';
-        }
-      }
-    };
-    
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [isMiddleMouseDown]);
-  
-  // Prevent default middle-click behavior
-  useEffect(() => {
-    const preventDefault = (e: MouseEvent) => {
-      if (e.button === 1) {
-        e.preventDefault();
-      }
-    };
-    
-    document.addEventListener('mousedown', preventDefault);
-    return () => {
-      document.removeEventListener('mousedown', preventDefault);
-    };
-  }, []);
   
   // Render connections between blocks
   const renderConnections = () => {
@@ -878,8 +813,8 @@ const Whiteboard = () => {
             x2={endX}
             y2={endY}
             stroke={connection.color || '#3b82f6'}
-            strokeWidth={2 / (scale > 1 ? scale * 0.7 : 1)} // Adjust line thickness based on zoom
-            markerEnd={`url(#arrowhead-${Math.floor(scale * 10)})`} // Use scale-specific arrowhead
+            strokeWidth={2}
+            markerEnd="url(#arrowhead)"
           />
           
           {/* Click area for easier selection */}
@@ -889,7 +824,7 @@ const Whiteboard = () => {
             x2={targetPos.x}
             y2={targetPos.y}
             stroke="transparent"
-            strokeWidth={10 / (scale > 1 ? scale * 0.7 : 1)} // Adjust click area based on zoom
+            strokeWidth={10}
             onClick={() => handleRemoveConnection(id)}
             style={{ cursor: 'pointer' }}
           />
@@ -955,31 +890,10 @@ const Whiteboard = () => {
     return null;
   };
   
-  // Add the arrowhead definition for connections with multiple sizes for different zoom levels
+  // Add the arrowhead definition for connections
   const renderSvgDefs = () => {
-    // Create arrowheads at various scales for zoom levels
-    const arrowheads = [];
-    for (let i = 1; i <= 50; i++) {
-      const scale = i / 10;
-      arrowheads.push(
-        <marker
-          key={`arrowhead-${i}`}
-          id={`arrowhead-${i}`}
-          markerWidth={10 / (scale > 1 ? Math.sqrt(scale) : 1)}
-          markerHeight={7 / (scale > 1 ? Math.sqrt(scale) : 1)}
-          refX="0"
-          refY="3.5"
-          orient="auto"
-        >
-          <polygon points="0 0, 10 3.5, 0 7" fill="#3b82f6" />
-        </marker>
-      );
-    }
-    
     return (
       <defs>
-        {arrowheads}
-        {/* Keep original arrowhead for backward compatibility */}
         <marker
           id="arrowhead"
           markerWidth="10"
@@ -994,19 +908,13 @@ const Whiteboard = () => {
     );
   };
 
-  // Add this function to force connection updates when blocks change or zoom changes
+  // Add this function to force connection updates when blocks change
   const forceConnectionUpdate = () => {
     // This triggers a re-render of connections without changing them
     if (connections.length > 0) {
       setConnections(prev => [...prev.map(conn => ({...conn, timestamp: Date.now()}))]);
     }
   };
-  
-  // Add an effect to update connections when scale changes
-  useEffect(() => {
-    // Update connections when scale changes
-    forceConnectionUpdate();
-  }, [scale]);
 
   // Show notification function
   const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -1178,78 +1086,6 @@ const Whiteboard = () => {
     }
   };
 
-  // Add zoom and pan functions
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    
-    // If user is holding shift, handle horizontal scrolling instead of zooming
-    if (isShiftDown && !e.ctrlKey) {
-      setPosition(prev => ({
-        x: prev.x - e.deltaY,
-        y: prev.y
-      }));
-      return;
-    }
-    
-    // Get cursor position relative to the container
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-    
-    // Calculate zoom factor
-    const delta = e.deltaY;
-    const zoomFactor = delta > 0 ? 0.9 : 1.1; // Zoom out or in
-    
-    // Calculate new scale with limits
-    const newScale = Math.min(Math.max(scale * zoomFactor, 0.1), 5); // Limit scale between 0.1 and 5
-    
-    // Calculate new position to zoom toward cursor
-    const newPosition = {
-      x: position.x - ((mouseX - position.x) * (zoomFactor - 1)),
-      y: position.y - ((mouseY - position.y) * (zoomFactor - 1))
-    };
-    
-    setScale(newScale);
-    setPosition(newPosition);
-  };
-  
-  const handleMouseDown = (e: React.MouseEvent) => {
-    // Middle mouse button (button 1) or left mouse with shift
-    if (e.button === 1 || (e.button === 0 && isShiftDown)) {
-      e.preventDefault();
-      setIsPanning(true);
-      setStartPanPosition({
-        x: e.clientX - position.x,
-        y: e.clientY - position.y
-      });
-      
-      if (e.button === 1) {
-        setIsMiddleMouseDown(true);
-      }
-      
-      // Change cursor to grabbing
-      if (containerRef.current) {
-        containerRef.current.style.cursor = 'grabbing';
-      }
-    }
-  };
-  
-  const handleMouseUp = (e: React.MouseEvent) => {
-    if (isPanning) {
-      setIsPanning(false);
-      // Reset cursor
-      if (containerRef.current) {
-        containerRef.current.style.cursor = 'default';
-      }
-    }
-    
-    if (e.button === 1) {
-      setIsMiddleMouseDown(false);
-    }
-  };
-  
   return (
     <div className="flex flex-col h-full">
       {/* Notification Toast */}
@@ -1634,26 +1470,17 @@ const Whiteboard = () => {
         </div>
       </div>
       
-      {/* Whiteboard area - with zoom and pan */}
+      {/* Whiteboard area - takes full height with subtle gradient background */}
       <div 
         ref={containerRef}
-        className="flex-grow relative overflow-hidden bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800"
+        className="flex-grow relative overflow-auto bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800"
         style={{ height: '100vh', position: 'relative' }}
-        onWheel={handleWheel}
-        onMouseDown={handleMouseDown}
-        onMouseUp={handleMouseUp}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => {
-          setIsPanning(false);
-          if (containerRef.current) {
-            containerRef.current.style.cursor = 'default';
-          }
-        }}
         onClick={(e) => {
-          // Don't deselect if clicking inside toolbar or when panning
+          // Don't deselect if clicking inside toolbar
           const toolbarElement = document.querySelector('.toolbar-container');
-          if ((toolbarElement && toolbarElement.contains(e.target as Node)) || isPanning) {
+          if (toolbarElement && toolbarElement.contains(e.target as Node)) {
             e.stopPropagation();
+            console.log("Click in toolbar detected - keeping active state");
             return;
           }
           
@@ -1670,96 +1497,81 @@ const Whiteboard = () => {
           // Clear any flow highlights
           setIsFlowHighlighted(false);
         }}
+        onMouseMove={handleMouseMove}
       >
-        {/* Zoom indicator */}
-        <div className="absolute bottom-20 right-20 bg-white/80 dark:bg-gray-800/80 px-3 py-1 rounded-full text-sm shadow-md z-50">
-          {Math.round(scale * 100)}%
-        </div>
-        
-        {/* Transformation container */}
-        <div 
-          className="absolute transition-transform"
-          style={{ 
-            transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
-            transformOrigin: '0 0',
-            width: '100%',
-            height: '100%'
-          }}
-        >
-          {/* Connection lines SVG layer with arrowhead definitions */}
-          <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
-            {renderSvgDefs()}
-            {renderConnections()}
-            
-            {/* Show connection in progress */}
-            {isCreatingConnection && connectionStart && renderTemporaryConnection()}
-          </svg>
+        {/* Connection lines SVG layer with arrowhead definitions */}
+        <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
+          {renderSvgDefs()}
+          {renderConnections()}
+          
+          {/* Show connection in progress */}
+          {isCreatingConnection && connectionStart && renderTemporaryConnection()}
+        </svg>
 
-          {/* Blocks */}
-          {blocks.map((block) => {
-            if (block.type === 'text') {
-              // Get active connections for this block
-              const activeConnections = getActiveConnectionsForBlock(block.id);
-              
-              // Check if this block is part of the highlighted flow
-              const flowIndex = isFlowHighlighted ? highlightedFlow.indexOf(block.id) : -1;
-              const isInFlow = flowIndex !== -1;
-              
-              return (
-                <div 
-                  key={block.id} 
-                  className={`relative ${isInFlow ? 'z-10' : ''}`}
-                >
-                  {/* Flow number indicator */}
-                  {isInFlow && (
-                    <div 
-                      className="absolute -top-5 -left-5 w-10 h-10 rounded-full bg-blue-500 text-white flex items-center justify-center font-bold text-lg z-20 shadow-lg border-2 border-white dark:border-gray-800 animate-pulse"
-                      style={{ 
-                        animation: 'pulse 2s infinite',
-                        boxShadow: '0 0 15px rgba(59, 130, 246, 0.6)'
-                      }}
-                    >
-                      {flowIndex + 1}
-                    </div>
-                  )}
-                  
-                  <TextBlock
-                    key={block.id}
-                    id={block.id}
-                    title={block.title}
-                    content={block.content}
-                    position={block.position}
-                    format={block.format || defaultTextFormat}
-                    titleFormat={block.titleFormat || block.format || defaultTextFormat}
-                    onUpdate={updateBlock}
-                    onDelete={deleteBlock}
-                    onPositionChange={updateBlockPosition}
-                    onActivate={setActiveBlock}
-                    isActive={activeBlockId === block.id}
-                    onStartConnection={handleStartConnection}
-                    onFinishConnection={handleFinishConnection}
-                    isCreatingConnection={isCreatingConnection}
-                    isConnectionSource={connectionStart?.blockId === block.id}
-                    activeConnections={activeConnections}
+        {/* Blocks */}
+        {blocks.map((block) => {
+          if (block.type === 'text') {
+            // Get active connections for this block
+            const activeConnections = getActiveConnectionsForBlock(block.id);
+            
+            // Check if this block is part of the highlighted flow
+            const flowIndex = isFlowHighlighted ? highlightedFlow.indexOf(block.id) : -1;
+            const isInFlow = flowIndex !== -1;
+            
+            return (
+              <div 
+                key={block.id} 
+                className={`relative ${isInFlow ? 'z-10' : ''}`}
+              >
+                {/* Flow number indicator */}
+                {isInFlow && (
+                  <div 
+                    className="absolute -top-5 -left-5 w-10 h-10 rounded-full bg-blue-500 text-white flex items-center justify-center font-bold text-lg z-20 shadow-lg border-2 border-white dark:border-gray-800 animate-pulse"
+                    style={{ 
+                      animation: 'pulse 2s infinite',
+                      boxShadow: '0 0 15px rgba(59, 130, 246, 0.6)'
+                    }}
+                  >
+                    {flowIndex + 1}
+                  </div>
+                )}
+                
+                <TextBlock
+                  key={block.id}
+                  id={block.id}
+                  title={block.title}
+                  content={block.content}
+                  position={block.position}
+                  format={block.format || defaultTextFormat}
+                  titleFormat={block.titleFormat || block.format || defaultTextFormat}
+                  onUpdate={updateBlock}
+                  onDelete={deleteBlock}
+                  onPositionChange={updateBlockPosition}
+                  onActivate={setActiveBlock}
+                  isActive={activeBlockId === block.id}
+                  onStartConnection={handleStartConnection}
+                  onFinishConnection={handleFinishConnection}
+                  isCreatingConnection={isCreatingConnection}
+                  isConnectionSource={connectionStart?.blockId === block.id}
+                  activeConnections={activeConnections}
+                />
+                
+                {/* Add a glowing effect around blocks in the flow */}
+                {isInFlow && (
+                  <div 
+                    className="absolute inset-0 rounded-lg pointer-events-none"
+                    style={{
+                      boxShadow: `0 0 0 4px rgba(59, 130, 246, ${0.7 - (flowIndex * 0.1)}), 0 0 20px rgba(59, 130, 246, ${0.5 - (flowIndex * 0.05)})`,
+                      zIndex: -1,
+                      animation: 'pulse 2s infinite'
+                    }}
                   />
-                  
-                  {/* Add a glowing effect around blocks in the flow */}
-                  {isInFlow && (
-                    <div 
-                      className="absolute inset-0 rounded-lg pointer-events-none"
-                      style={{
-                        boxShadow: `0 0 0 4px rgba(59, 130, 246, ${0.7 - (flowIndex * 0.1)}), 0 0 20px rgba(59, 130, 246, ${0.5 - (flowIndex * 0.05)})`,
-                        zIndex: -1,
-                        animation: 'pulse 2s infinite'
-                      }}
-                    />
-                  )}
-                </div>
-              );
-            }
-            return null;
-          })}
-        </div>
+                )}
+              </div>
+            );
+          }
+          return null;
+        })}
         
         {blocks.length === 0 && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400 dark:text-gray-500">
@@ -1777,7 +1589,7 @@ const Whiteboard = () => {
           </div>
         )}
         
-        {/* Add Block floating button */}
+        {/* Add Block floating button - larger and more colorful */}
         <button
           onClick={(e) => addBlock(e)}
           className="fixed bottom-8 right-8 flex items-center justify-center w-16 h-16 rounded-md 
@@ -1789,20 +1601,7 @@ const Whiteboard = () => {
           <span className="text-4xl font-bold">+</span>
         </button>
         
-        {/* Help indicator for zoom/pan */}
-        <div className="fixed bottom-32 right-8 bg-white/90 dark:bg-gray-800/90 shadow-lg rounded-lg p-3 text-xs z-50 w-48">
-          <h3 className="font-bold mb-1 text-gray-800 dark:text-gray-200">Navigation:</h3>
-          <ul className="space-y-1 text-gray-600 dark:text-gray-300">
-            <li className="flex items-center gap-2">
-              <span className="font-bold">Zoom:</span> Mouse wheel
-            </li>
-            <li className="flex items-center gap-2">
-              <span className="font-bold">Pan:</span> Middle mouse or Shift+drag
-            </li>
-          </ul>
-        </div>
-        
-        {/* Task input bar */}
+        {/* ChatGPT-style floating prompt bar - larger and more colorful */}
         <div className="fixed bottom-8 left-0 right-0 z-20 px-4 flex justify-center">
           <div className="flex items-center gap-3 rounded-full border border-blue-200 dark:border-blue-900 
             bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm px-5 py-3 shadow-lg shadow-blue-500/10
@@ -1840,7 +1639,7 @@ const Whiteboard = () => {
         </div>
       </div>
 
-      {/* Color dropdown modals */}
+      {/* Text Color Popup Modal */}
       {textColorDropdownOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-20" onClick={() => setTextColorDropdownOpen(false)}>
           <div 
@@ -1883,6 +1682,7 @@ const Whiteboard = () => {
         </div>
       )}
 
+      {/* Background Color Popup Modal */}
       {bgColorDropdownOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-20" onClick={() => setBgColorDropdownOpen(false)}>
           <div 
