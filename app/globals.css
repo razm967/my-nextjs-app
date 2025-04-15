@@ -1,146 +1,239 @@
-@import "tailwindcss";
+/* Import external styles first */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Arial&family=Courier+New&family=Georgia&family=Trebuchet+MS&family=Verdana&display=swap');
+@import 'reactflow/dist/style.css';
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* Tailwind directives */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom font settings */
+@layer base {
+  /* Font definitions to ensure correct font families are applied */
+  .font-arial {
+    font-family: Arial, sans-serif;
+  }
+  
+  .font-georgia {
+    font-family: Georgia, serif;
+  }
+  
+  .font-verdana {
+    font-family: Verdana, sans-serif;
+  }
+  
+  .font-courier {
+    font-family: 'Courier New', monospace;
+  }
+  
+  .font-trebuchet {
+    font-family: 'Trebuchet MS', sans-serif;
+  }
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
+/* Custom styles */
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --foreground-rgb: 0, 0, 0;
+    --background-start-rgb: 214, 219, 220;
+    --background-end-rgb: 255, 255, 255;
+    --primary-color: #6366f1;
+    --connecting-color: #22c55e;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --foreground-rgb: 255, 255, 255;
+      --background-start-rgb: 0, 0, 0;
+      --background-end-rgb: 0, 0, 0;
+    }
+  }
+
+  html, body {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    font-family: 'Inter', sans-serif;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-}
-
-/* Connection Points */
-.connection-point {
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  background-color: #ffffff;
-  border: 2px solid #3b82f6;
-  border-radius: 50%;
-  cursor: pointer;
-  z-index: 10;
-  transform: translate(-50%, -50%);
-  transition: all 0.2s ease;
-}
-
-.connection-point:hover {
-  transform: translate(-50%, -50%) scale(1.2);
-  background-color: #93c5fd;
-}
-
-.connection-point.active {
-  background-color: #2563eb;
-  border-color: #ffffff;
-}
-
-.connection-point.highlighted {
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
-}
-
-/* Top connection point */
-.connection-point.top {
-  top: 0;
-  left: 50%;
-}
-
-/* Right connection point */
-.connection-point.right {
-  top: 50%;
-  right: 0;
-  transform: translate(50%, -50%);
-}
-.connection-point.right:hover {
-  transform: translate(50%, -50%) scale(1.2);
-}
-
-/* Bottom connection point */
-.connection-point.bottom {
-  bottom: 0;
-  left: 50%;
-  transform: translate(-50%, 50%);
-}
-.connection-point.bottom:hover {
-  transform: translate(-50%, 50%) scale(1.2);
-}
-
-/* Left connection point */
-.connection-point.left {
-  top: 50%;
-  left: 0;
-  transform: translate(-50%, -50%);
-}
-
-/* Connection creation cursor */
-.creating-connection {
-  cursor: crosshair;
-}
-
-/* Connection line styles */
-.connection-line {
-  stroke: #3b82f6;
-  stroke-width: 2;
-  fill: none;
-}
-
-.connection-line:hover {
-  stroke-width: 3;
-  stroke: #2563eb;
-}
-
-.connection-line.dashed {
-  stroke-dasharray: 5, 5;
-}
-
-/* Snapping indicator */
-.snap-indicator {
-  stroke: #10b981;
-  fill: #10b981;
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0% {
-    opacity: 0.6;
-    transform: scale(1);
+@layer components {
+  /* Text formatting toolbar styles */
+  .toolbar-container {
+    position: relative;
+    z-index: 100;
   }
-  50% {
+
+  /* Compact single-row toolbar styling */
+  .toolbar-container select,
+  .toolbar-container button {
+    font-size: 12px;
+    min-height: 28px;
+  }
+
+  .toolbar-container select {
+    max-width: 100px;
+    padding: 2px 4px;
+  }
+
+  /* Auto-resize node styles */
+  .react-flow__node {
+    transition: width 0.3s ease, height 0.3s ease;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    hyphens: auto;
+  }
+
+  /* Ensure text always stays inside nodes */
+  .react-flow__node-default {
+    overflow: hidden;
+  }
+
+  /* Smooth transition for textarea height changes */
+  .react-flow__node textarea {
+    transition: height 0.2s ease;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+  
+  /* Fix for overflow-wrap-anywhere support */
+  .overflow-wrap-anywhere {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  /* Make sure the toolbar is fully visible */
+  .react-flow__node.node-editing {
+    z-index: 50 !important;
+  }
+
+  /* Ensure toolbar appears above all other elements */
+  .react-flow__node.node-editing:has(.toolbar-container) {
+    padding-top: 5px;
+  }
+
+  .reactflow-wrapper {
+    flex-grow: 1;
+    height: 100%;
+  }
+
+  .dndflow {
+    flex-direction: column;
+    display: flex;
+    height: 100%;
+  }
+
+  .react-flow__node {
+    border-radius: 12px;
+    width: auto;
+    color: #222;
+    font-size: 12px;
+    text-align: left;
+    border-width: 1px;
+    padding: 8px;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  }
+
+  .react-flow__node:hover {
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    transform: translateY(-1px);
+  }
+
+  .react-flow__node-default {
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+  }
+
+  /* Enhanced handle styles */
+  .react-flow__handle {
+    width: 12px;
+    height: 12px;
+    background-color: #1a192b;
+    border: 2px solid white;
+    transition: all 0.2s ease;
+    opacity: 0.7;
+  }
+
+  /* Show handle more clearly on hover */
+  .react-flow__handle:hover {
+    width: 16px;
+    height: 16px;
     opacity: 1;
-    transform: scale(1.2);
+    background-color: var(--connecting-color);
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.3);
+    cursor: crosshair;
   }
-  100% {
-    opacity: 0.6;
-    transform: scale(1);
+
+  /* Connection handles are more visible when connecting is active */
+  .react-flow__handle.connecting {
+    background-color: var(--connecting-color);
+    animation: pulse 1.5s infinite;
   }
-}
 
-/* Connection wrapper to ensure all connections are contained */
-.connections-wrapper {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 5;
-}
+  /* Glow effect for connection handles when in connecting mode */
+  @keyframes pulse {
+    0% {
+      box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+    }
+    70% {
+      box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+    }
+  }
 
-/* Connection handles should receive pointer events */
-.connections-wrapper .connection-point {
-  pointer-events: auto;
-}
+  /* Position adjustments */
+  .react-flow__handle-top {
+    top: -7px;
+  }
+
+  .react-flow__handle-bottom {
+    bottom: -7px;
+  }
+
+  .react-flow__handle-left {
+    left: -7px;
+  }
+
+  .react-flow__handle-right {
+    right: -7px;
+  }
+
+  /* Make the connection line stand out */
+  .react-flow__edge-path {
+    stroke: #1a192b;
+    stroke-width: 2px;
+    transition: stroke 0.2s ease;
+  }
+
+  .react-flow__edge:hover .react-flow__edge-path {
+    stroke: var(--connecting-color);
+    stroke-width: 3px;
+  }
+
+  /* Connection line in active state */
+  .react-flow__connectionline {
+    stroke: var(--connecting-color);
+    stroke-width: 3px;
+    stroke-dasharray: 5;
+    animation: dash 1s linear infinite;
+  }
+
+  @keyframes dash {
+    to {
+      stroke-dashoffset: -20;
+    }
+  }
+
+  /* Style the edges when selected */
+  .react-flow__edge.selected .react-flow__edge-path {
+    stroke: var(--primary-color);
+    stroke-width: 3px;
+  }
+} 
