@@ -236,4 +236,45 @@
     stroke: var(--primary-color);
     stroke-width: 3px;
   }
+
+  /* Knife tool styles */
+  .knife-active .react-flow__edge:hover .react-flow__edge-path {
+    stroke: #ef4444;  /* Red color when knife is hovering */
+    stroke-width: 4px;
+    stroke-dasharray: 5;
+    animation: knife-pulse 1s infinite;
+  }
+  
+  @keyframes knife-pulse {
+    0% {
+      stroke-opacity: 0.8;
+    }
+    50% {
+      stroke-opacity: 0.4;
+    }
+    100% {
+      stroke-opacity: 0.8;
+    }
+  }
+}
+
+@font-face {
+  font-family: 'Canva Sans';
+  src: url('/fonts/CanvaSans-Regular.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Canva Sans';
+  src: url('/fonts/CanvaSans-Bold.woff2') format('woff2');
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Apply Canva Sans to text node content */
+.node-content, .formatted-content {
+  font-family: var(--font-canva-sans), sans-serif !important;
 } 

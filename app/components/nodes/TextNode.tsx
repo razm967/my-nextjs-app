@@ -2,13 +2,14 @@ import { memo, useState, useRef, CSSProperties, useEffect } from 'react';
 import { Handle, Position, NodeProps, useReactFlow } from 'reactflow';
 import { useFlowStore } from '../../store/flowStore';
 import ContextMenu from '../ContextMenu';
-import TextFormatToolbar from '../TextFormatToolbar';
-import { FaBold, FaItalic, FaUnderline } from 'react-icons/fa';
+import { FiCopy, FiCheck, FiX } from 'react-icons/fi';
 
 // Text node component for the flow
 const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?: CSSProperties, draggable?: boolean, selected?: boolean }) => {
   // Get updateNodeText function from our store
   const updateNodeText = useFlowStore((state) => state.updateNodeText);
+  // Add deleteNode function from the store
+  const deleteNode = useFlowStore((state) => state.deleteNode);
   
   // Get ReactFlow instance to manipulate node properties
   const reactFlowInstance = useReactFlow();
@@ -26,20 +27,6 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
   const [fontSize, setFontSize] = useState(data.fontSize || '14');
   const [fontFamily, setFontFamily] = useState(data.fontFamily || 'Canva Sans');
   
-  // State for text selection
-  const [selectionStart, setSelectionStart] = useState<number | null>(null);
-  const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
-  const [selectedText, setSelectedText] = useState<string>('');
-  const [hasSelection, setHasSelection] = useState(false);
-  
-  // State for rich text formatting
-  const [richTextFormats, setRichTextFormats] = useState<Array<{
-    start: number;
-    end: number;
-    format: 'bold' | 'italic' | 'underline' | 'color' | 'fontSize' | 'fontFamily' | 'align';
-    value?: string;
-  }>>(data.richTextFormats || []);
-  
   // Track if any part of the node is being edited
   const isAnyEditing = isEditing || isTitleEditing || isNameEditing;
   
@@ -54,10 +41,18 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
     left: 0,
   });
   
+  // Add state for node hover
+  const [isHovered, setIsHovered] = useState(false);
+  
   // Reference to the node element
   const nodeRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const nameTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const titleTextareaRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  
+  // Add state for copy feedback
+  const [showCopyFeedback, setShowCopyFeedback] = useState(false);
   
   // Update internal state when data changes (e.g., from external sources)
   useEffect(() => {
@@ -67,7 +62,6 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
     setTextStyle(data.textStyle || {});
     setFontSize(data.fontSize || '14');
     setFontFamily(data.fontFamily || 'Canva Sans');
-    setRichTextFormats(data.richTextFormats || []);
   }, [data]);
 
   // Auto-adjust textarea height when editing
@@ -81,26 +75,27 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
     }
   }, [isEditing, text]);
 
-  // Track text selection in the textarea
-  const handleSelectionChange = () => {
-    if (isEditing && textareaRef.current) {
-      const start = textareaRef.current.selectionStart;
-      const end = textareaRef.current.selectionEnd;
-      
-      if (start !== end) {
-        // We have a selection
-        setSelectionStart(start);
-        setSelectionEnd(end);
-        setSelectedText(text.substring(start, end));
-        setHasSelection(true);
-      } else {
-        setSelectionStart(null);
-        setSelectionEnd(null);
-        setSelectedText('');
-        setHasSelection(false);
-      }
+  // Auto-adjust name textarea height when editing name
+  useEffect(() => {
+    if (isNameEditing && nameTextareaRef.current) {
+      const textarea = nameTextareaRef.current;
+      // Reset height first to get accurate scrollHeight
+      textarea.style.height = 'auto';
+      // Set height based on content (plus a bit of padding)
+      textarea.style.height = `${textarea.scrollHeight + 2}px`;
     }
-  };
+  }, [isNameEditing, name]);
+
+  // Auto-adjust title textarea height when editing title
+  useEffect(() => {
+    if (isTitleEditing && titleTextareaRef.current) {
+      const textarea = titleTextareaRef.current;
+      // Reset height first to get accurate scrollHeight
+      textarea.style.height = 'auto';
+      // Set height based on content (plus a bit of padding)
+      textarea.style.height = `${textarea.scrollHeight + 2}px`;
+    }
+  }, [isTitleEditing, title]);
 
   // Resize node based on content
   useEffect(() => {
@@ -111,9 +106,14 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
       if (contentRef.current && nodeRef.current) {
         // Check if we're in React Flow (id exists in the flow)
         if (reactFlowInstance.getNode(id)) {
-          // Get the content measurements
-          const contentWidth = text.length * (parseInt(fontSize) * 0.6); // Approximate width based on text length
+          // Get the measurements of all text elements
+          const titleWidth = title ? title.length * (parseInt(fontSize) * 0.7) : 0; // Title has larger font
+          const nameWidth = name ? name.length * (parseInt(fontSize) * 0.5) : 0; // Name/tag has smaller font
+          const contentWidth = text.length * (parseInt(fontSize) * 0.6); // Content with normal font
           const contentHeight = contentRef.current.scrollHeight;
+          
+          // Use the longest text element for width calculation
+          const maxWidth = Math.max(contentWidth, nameWidth, titleWidth);
           
           // Update node dimensions with calculated size
           // First get the current node position
@@ -121,7 +121,7 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
           if (node) {
             // Calculate width based on text length with min/max constraints
             // For longer text, make the node wider to improve readability
-            let nodeWidth = Math.max(200, Math.min(500, contentWidth + 40));
+            let nodeWidth = Math.max(200, Math.min(500, maxWidth + 40));
             
             // Apply calculated dimensions to the node
             reactFlowInstance.setNodes((nodes) => 
@@ -161,7 +161,7 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
   useEffect(() => {
     if (!selected && isAnyEditing) {
       // Save changes when node is deselected
-      updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily, richTextFormats);
+      updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily);
       // Only exit editing mode if node is deselected from outside
       const noActiveElement = document.activeElement === document.body;
       if (noActiveElement) {
@@ -170,96 +170,7 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
         setIsNameEditing(false);
       }
     }
-  }, [selected, id, text, title, name, textStyle, fontSize, fontFamily, richTextFormats, isAnyEditing, updateNodeText]);
-  
-  // Function to apply formatting to selected text using rich text format
-  const applyRichTextFormat = (format: 'bold' | 'italic' | 'underline' | 'color' | 'fontSize' | 'fontFamily' | 'align', value?: string) => {
-    if (!hasSelection || selectionStart === null || selectionEnd === null) return;
-    
-    // Create a new formatting entry
-    const newFormat = {
-      start: selectionStart,
-      end: selectionEnd,
-      format,
-      value
-    };
-    
-    // Add the new format to our array
-    setRichTextFormats([...richTextFormats, newFormat]);
-    
-    // Keep focus and selection
-    setTimeout(() => {
-      if (textareaRef.current) {
-        textareaRef.current.focus();
-        textareaRef.current.setSelectionRange(selectionStart, selectionEnd);
-      }
-    }, 0);
-  };
-
-  // Function to get formatted display text
-  const getFormattedText = () => {
-    if (!text) return '';
-    
-    // Create spans for each formatted section
-    let formattedText = document.createElement('div');
-    let lastIndex = 0;
-    
-    // Sort formats by start position
-    const sortedFormats = [...richTextFormats].sort((a, b) => a.start - b.start);
-    
-    // Apply each format
-    for (const format of sortedFormats) {
-      // Add unformatted text before this format
-      if (format.start > lastIndex) {
-        const textNode = document.createTextNode(text.substring(lastIndex, format.start));
-        formattedText.appendChild(textNode);
-      }
-      
-      // Create formatted span
-      const span = document.createElement('span');
-      span.textContent = text.substring(format.start, format.end);
-      
-      // Apply the appropriate styling
-      switch (format.format) {
-        case 'bold':
-          span.style.fontWeight = 'bold';
-          break;
-        case 'italic':
-          span.style.fontStyle = 'italic';
-          break;
-        case 'underline':
-          span.style.textDecoration = 'underline';
-          break;
-        case 'color':
-          if (format.value) span.style.color = format.value;
-          break;
-        case 'fontSize':
-          if (format.value) span.style.fontSize = `${format.value}px`;
-          break;
-        case 'fontFamily':
-          if (format.value) span.style.fontFamily = format.value;
-          break;
-        case 'align':
-          // Alignment needs special handling as it's a block-level style
-          if (format.value) {
-            span.style.display = 'block';
-            span.style.textAlign = format.value;
-          }
-          break;
-      }
-      
-      formattedText.appendChild(span);
-      lastIndex = format.end;
-    }
-    
-    // Add any remaining unformatted text
-    if (lastIndex < text.length) {
-      const textNode = document.createTextNode(text.substring(lastIndex));
-      formattedText.appendChild(textNode);
-    }
-    
-    return formattedText.innerHTML;
-  };
+  }, [selected, id, text, title, name, textStyle, fontSize, fontFamily, isAnyEditing, updateNodeText]);
   
   // Handle double click to enter edit mode for content
   const handleDoubleClick = (e: React.MouseEvent) => {
@@ -285,45 +196,36 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
   // Handle text change
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setText(e.target.value);
-    
-    // When text changes, we need to adjust all the rich text format positions
-    // This is simplified and would need a more sophisticated algorithm for production
-    // For example, it should track cursor position and insertion/deletion
-    if (e.target.value.length !== text.length) {
-      // For now, just clear formats when text changes significantly
-      // A real implementation would adjust format positions based on text changes
-      setRichTextFormats([]);
-    }
   };
   
   // Handle title change
-  const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleTitleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setTitle(e.target.value);
   };
   
   // Handle name change
-  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setName(e.target.value);
   };
   
   // Handle blur to exit edit mode and save content
   const handleBlur = () => {
     setIsEditing(false);
-    updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily, richTextFormats);
+    updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily);
   };
   
   // Handle blur to exit edit mode and save title
   const handleTitleBlur = () => {
     setIsTitleEditing(false);
     // Update node data with new title
-    updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily, richTextFormats);
+    updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily);
   };
   
   // Handle blur to exit edit mode and save name
   const handleNameBlur = () => {
     setIsNameEditing(false);
     // Update node data with new name
-    updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily, richTextFormats);
+    updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily);
   };
   
   // Block all events that might cause node deselection
@@ -338,11 +240,10 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       setIsEditing(false);
-      updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily, richTextFormats);
+      updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily);
     } else if (e.key === 'Escape') {
       setIsEditing(false);
-      setText(data.text); // Reset to original text
-      setRichTextFormats(data.richTextFormats || []); // Reset formats
+      setText(data.text || ''); // Reset to original text
     }
     
     // Prevent propagation to avoid triggering ReactFlow shortcuts
@@ -350,14 +251,14 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
   };
   
   // Handle key press for title (Enter to save, Escape to cancel)
-  const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       setIsTitleEditing(false);
-      updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily, richTextFormats);
+      updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily);
     } else if (e.key === 'Escape') {
       setIsTitleEditing(false);
-      setTitle(data.label); // Reset to original title
+      setTitle(data.label || ''); // Reset to original title
     }
     
     // Prevent propagation to avoid triggering ReactFlow shortcuts
@@ -365,11 +266,11 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
   };
   
   // Handle key press for name (Enter to save, Escape to cancel)
-  const handleNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       setIsNameEditing(false);
-      updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily, richTextFormats);
+      updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily);
     } else if (e.key === 'Escape') {
       setIsNameEditing(false);
       setName(data.name || ''); // Reset to original name
@@ -399,91 +300,10 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
   const closeContextMenu = () => {
     setContextMenu({ ...contextMenu, show: false });
   };
-
-  // Text formatting handlers - now working with selections
-  const handleBold = () => {
-    if (hasSelection) {
-      applyRichTextFormat('bold');
-    } else {
-      setTextStyle(prev => ({
-        ...prev,
-        fontWeight: prev.fontWeight === 'bold' ? 'normal' : 'bold'
-      }));
-    }
-  };
-
-  const handleItalic = () => {
-    if (hasSelection) {
-      applyRichTextFormat('italic');
-    } else {
-      setTextStyle(prev => ({
-        ...prev,
-        fontStyle: prev.fontStyle === 'italic' ? 'normal' : 'italic'
-      }));
-    }
-  };
-
-  const handleUnderline = () => {
-    if (hasSelection) {
-      applyRichTextFormat('underline');
-    } else {
-      setTextStyle(prev => ({
-        ...prev,
-        textDecoration: prev.textDecoration === 'underline' ? 'none' : 'underline'
-      }));
-    }
-  };
-
-  const handleTextColor = (color: string) => {
-    if (hasSelection) {
-      applyRichTextFormat('color', color);
-    } else {
-      setTextStyle(prev => ({
-        ...prev,
-        color
-      }));
-    }
-  };
-
-  const handleFontSize = (size: string) => {
-    if (hasSelection) {
-      applyRichTextFormat('fontSize', size);
-    } else {
-      setFontSize(size);
-      setTextStyle(prev => ({
-        ...prev,
-        fontSize: `${size}px`
-      }));
-    }
-  };
-
-  const handleAlign = (align: 'left' | 'center' | 'right') => {
-    if (hasSelection) {
-      applyRichTextFormat('align', align);
-    } else {
-      setTextStyle(prev => ({
-        ...prev,
-        textAlign: align
-      }));
-    }
-  };
-  
-  // Handle font family change
-  const handleFontFamilyChange = (family: string) => {
-    if (hasSelection) {
-      applyRichTextFormat('fontFamily', family);
-    } else {
-      setFontFamily(family);
-      setTextStyle(prev => ({
-        ...prev,
-        fontFamily: family
-      }));
-    }
-  };
   
   // Style to apply to text when editing and when displaying
   const appliedTextStyle = {
-    fontFamily, // Apply font family directly
+    fontFamily: fontFamily || 'Canva Sans', // Use Canva Sans as fallback
     fontSize: `${fontSize}px`,
     ...textStyle
   };
@@ -508,9 +328,15 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
   
   // Add a border highlight when editing
   if (isAnyEditing) {
-    nodeStyle.borderColor = '#1a192b';
+    nodeStyle.borderColor = '#3b82f6';
     nodeStyle.borderWidth = '2px';
     nodeStyle.boxShadow = '0 0 0 2px rgba(26, 25, 43, 0.2)';
+  }
+
+  if (selected) {
+    nodeStyle.borderColor = '#3b82f6'; // Blue color
+    nodeStyle.borderWidth = '2px';
+    nodeStyle.boxShadow = '0 0 0 1px rgba(59, 130, 246, 0.5)'; // Blue glow effect
   }
   
   // Handle styles - extracted to variables for consistency
@@ -526,17 +352,73 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
 
   // Handle styles for different positions
   const handleStyleTop = { ...handleBaseStyle, top: '-7px' };     // Adjusted position
-  const handleStyleBottom = { ...handleBaseStyle, bottom: '-7px' }; // Adjusted position
+  const handleStyleBottom = { 
+    ...handleBaseStyle, 
+    bottom: '-7px',
+    background: '#4CAF50',  // Green color to indicate it's only a target
+    borderColor: '#E8F5E9'  // Light green border
+  }; 
   const handleStyleLeft = { ...handleBaseStyle, left: '-7px' };     // Adjusted position
   const handleStyleRight = { ...handleBaseStyle, right: '-7px' };   // Adjusted position
 
+  // Handle node deletion - no confirmation
+  const handleDeleteNode = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    deleteNode(id);
+  };
+
+  // Add copy functionality - copies just title and content
+  const handleCopyNode = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    
+    // Get the current title and content
+    const currentTitle = title || '';
+    const currentContent = text || '';
+    
+    // Create formatted text with title and content only
+    let copyText = '';
+    
+    // Always add title if it exists
+    if (currentTitle.trim()) {
+      copyText += `${currentTitle}\n\n`;
+    }
+    
+    // Always add content
+    copyText += currentContent;
+    
+    // Copy to clipboard
+    navigator.clipboard.writeText(copyText)
+      .then(() => {
+        // Show feedback
+        setShowCopyFeedback(true);
+        setTimeout(() => {
+          setShowCopyFeedback(false);
+        }, 1000);
+      })
+      .catch(err => {
+        console.error('Failed to copy: ', err);
+      });
+  };
+
+  // First, update the style calculation
+  if (data.markedForCut) {
+    // Simpler, more subtle styling with lowered opacity
+    nodeStyle.opacity = 0.6; // Lower node opacity
+    nodeStyle.borderColor = '#ef4444'; // Red border
+    nodeStyle.borderWidth = '2px';
+  }
+
   return (
-    <div 
+    <div
       ref={nodeRef}
       className={`p-4 rounded-xl shadow-md border border-gray-200 min-w-[200px] max-w-[500px] relative ${editingClass} ${selectedClass} handle-connection-node`}
       style={nodeStyle}
       onContextMenu={handleContextMenu}
       onClick={blockNodeDeselection}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       onMouseDown={(e) => {
         // Prevent dragging when in edit mode
         if (isAnyEditing) {
@@ -544,35 +426,44 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
         }
       }}
     >
+      {/* Node actions - only show when hovering or selected, not when editing */}
+      {!isAnyEditing && (isHovered || selected) && (
+        <div className="absolute top-1 right-1 flex items-center z-10 bg-white bg-opacity-70 rounded px-0.5">
+          {/* Copy button with state-based feedback */}
+          <div className="relative">
+            <button
+              className={`${showCopyFeedback ? 'text-green-500 hover:text-green-600' : 'text-blue-500 hover:text-blue-700'} text-sm p-1 transition-colors ${selected && !isHovered ? 'opacity-70' : 'opacity-90'} flex items-center justify-center`}
+              onClick={handleCopyNode}
+              title="Copy node content"
+            >
+              {showCopyFeedback ? <FiCheck size={16} /> : <FiCopy size={14} />}
+            </button>
+          </div>
+          
+          {/* Delete button */}
+          <button
+            className={`text-red-500 text-sm p-1 hover:text-red-700 transition-colors ${selected && !isHovered ? 'opacity-70' : 'opacity-90'} flex items-center justify-center`}
+            onClick={handleDeleteNode}
+            title="Delete node"
+          >
+            <FiX size={16} />
+          </button>
+        </div>
+      )}
+
       {isAnyEditing && (
         <div className="absolute -top-7 left-0 right-0 text-xs text-center bg-primary text-white py-1 px-2 rounded-t-md opacity-80">
           Node locked for editing
-        </div>
-      )}
-      
-      {/* Text Formatting Toolbar - shown only when editing content */}
-      {isEditing && (
-        <div className="toolbar-container" onMouseDown={blockNodeDeselection} onClick={blockNodeDeselection}>
-          <TextFormatToolbar 
-            onBold={handleBold}
-            onItalic={handleItalic}
-            onUnderline={handleUnderline}
-            onTextColor={handleTextColor}
-            onFontSize={handleFontSize}
-            onAlign={handleAlign}
-            onFontFamily={handleFontFamilyChange}
-            currentFontSize={fontSize}
-            currentFontFamily={fontFamily}
-          />
         </div>
       )}
     
       {/* Node identifier - above the title */}
       <div className="mb-1 text-xs text-gray-400 font-medium">
         {isNameEditing ? (
-          <input
+          <textarea
+            ref={nameTextareaRef}
             autoFocus
-            className={`${inputStyles} py-0.5 px-1 text-xs`}
+            className={`${inputStyles} py-0.5 px-1 text-xs w-full resize-none overflow-hidden min-h-[20px]`}
             value={name}
             onChange={handleNameChange}
             onBlur={handleNameBlur}
@@ -581,10 +472,11 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
               e.stopPropagation();
               blockNodeDeselection(e);
             }}
+            rows={1}
           />
         ) : (
           <div
-            className="py-0.5 px-1 hover:bg-gray-50 rounded cursor-text"
+            className="py-0.5 px-1 hover:bg-gray-50 rounded cursor-text whitespace-normal break-words"
             onDoubleClick={handleNameDoubleClick}
             onClick={blockNodeDeselection}
           >
@@ -607,9 +499,10 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
         {/* Title - now editable */}
         <div className="text-sm font-semibold text-gray-800 mb-1">
           {isTitleEditing ? (
-            <input
+            <textarea
+              ref={titleTextareaRef}
               autoFocus
-              className={`${inputStyles} p-1 text-sm font-semibold`}
+              className={`${inputStyles} p-1 text-sm font-semibold w-full resize-none overflow-hidden min-h-[24px]`}
               value={title}
               onChange={handleTitleChange}
               onBlur={handleTitleBlur}
@@ -618,14 +511,15 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
                 e.stopPropagation();
                 blockNodeDeselection(e);
               }}
+              rows={1}
             />
           ) : (
             <div
-              className="p-1 hover:bg-gray-50 rounded cursor-text"
+              className="p-1 hover:bg-gray-50 rounded cursor-text whitespace-normal break-words"
               onDoubleClick={handleTitleDoubleClick}
               onClick={blockNodeDeselection}
             >
-              {title}
+              {title || 'Double-click to add title'}
             </div>
           )}
         </div>
@@ -644,9 +538,6 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
               e.stopPropagation();
               blockNodeDeselection(e);
             }}
-            onSelect={handleSelectionChange}
-            onKeyUp={handleSelectionChange}
-            onMouseUp={handleSelectionChange}
             style={appliedTextStyle}
             rows={1}
           />
@@ -656,33 +547,8 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
             onDoubleClick={handleDoubleClick}
             onClick={blockNodeDeselection}
             style={appliedTextStyle}
-            dangerouslySetInnerHTML={{ __html: getFormattedText() }}
-          />
-        )}
-        
-        {/* Indicators showing applied formats */}
-        {isEditing && richTextFormats.length > 0 && (
-          <div className="text-xs text-gray-400 mt-1 flex gap-1 flex-wrap">
-            {richTextFormats.map((format, index) => (
-              <span key={index} className="px-1 bg-gray-100 rounded-full text-xs flex items-center gap-1">
-                {format.format === 'bold' && <FaBold className="text-xs" />}
-                {format.format === 'italic' && <FaItalic className="text-xs" />}
-                {format.format === 'underline' && <FaUnderline className="text-xs" />}
-                {format.format === 'color' && (
-                  <span className="flex items-center">
-                    <span 
-                      className="w-2 h-2 rounded-full mr-1"
-                      style={{ backgroundColor: format.value }}
-                    ></span>
-                    color
-                  </span>
-                )}
-                {format.format === 'fontSize' && `${format.value}px`}
-                {format.format === 'fontFamily' && format.value}
-                {format.format === 'align' && `align-${format.value}`}
-                <span>{text.substring(format.start, format.end).slice(0, 4)}{text.substring(format.start, format.end).length > 4 ? '...' : ''}</span>
-              </span>
-            ))}
+          >
+            {text || 'Double-click to add content'}
           </div>
         )}
       </div>
@@ -722,6 +588,12 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
           left={contextMenu.left}
           onClose={closeContextMenu}
         />
+      )}
+
+      {data.markedForCut && (
+        <div className="absolute top-2 right-2 bg-red-100 text-red-500 text-xs px-2 py-1 rounded-md opacity-80 shadow-sm">
+          cut
+        </div>
       )}
     </div>
   );

@@ -42,6 +42,8 @@ type RFState = {
     richTextFormats?: RichTextFormat[]
   ) => void;
   deleteNode: (nodeId: string) => void;
+  deleteEdge: (edgeId: string) => void;
+  deleteEdgesByPosition: (x: number, y: number, radius: number) => void;
 };
 
 // Initial nodes for our flow
@@ -51,9 +53,9 @@ const initialNodes: Node[] = [
     type: 'textNode',
     position: { x: 250, y: 5 },
     data: { 
-      label: 'Start here', 
-      text: 'Welcome to Flow Whiteboard!',
-      name: 'Initial Node',
+      label: '', 
+      text: '',
+      name: '',
       textStyle: {},
       fontSize: '14',
       fontFamily: 'Canva Sans',
@@ -98,8 +100,8 @@ export const useFlowStore = create<RFState>((set, get) => ({
       type,
       position,
       data: { 
-        label: `New ${type}`, 
-        text: 'Add your text here',
+        label: '', 
+        text: '',
         name: '',
         textStyle: {},
         fontSize: '14',
@@ -184,4 +186,84 @@ export const useFlowStore = create<RFState>((set, get) => ({
       edges: newEdges,
     });
   },
-})); 
+  
+  // Delete a specific edge by ID
+  deleteEdge: (edgeId: string) => {
+    const newEdges = get().edges.filter(edge => edge.id !== edgeId);
+    set({
+      edges: newEdges,
+    });
+  },
+  
+  // Delete edges that pass near a specific position (for the knife tool)
+  deleteEdgesByPosition: (x: number, y: number, radius: number) => {
+    // To determine if an edge is close enough to delete, we calculate the
+    // minimum distance from the point (x,y) to the edge path
+    // For simplicity, we check proximity to the straight line between source and target
+    const edgesToDelete: string[] = [];
+    
+    get().edges.forEach(edge => {
+      // Find source and target nodes to get their positions
+      const sourceNode = get().nodes.find(node => node.id === edge.source);
+      const targetNode = get().nodes.find(node => node.id === edge.target);
+      
+      if (sourceNode && targetNode) {
+        // Simplification: Calculate center points of nodes
+        const sourceX = sourceNode.position.x + (sourceNode.width || 0) / 2;
+        const sourceY = sourceNode.position.y + (sourceNode.height || 0) / 2;
+        const targetX = targetNode.position.x + (targetNode.width || 0) / 2;
+        const targetY = targetNode.position.y + (targetNode.height || 0) / 2;
+        
+        // Calculate distance from point to line segment
+        const distance = distanceToLineSegment(
+          sourceX, sourceY, targetX, targetY, x, y
+        );
+        
+        // If close enough, mark for deletion
+        if (distance <= radius) {
+          edgesToDelete.push(edge.id);
+        }
+      }
+    });
+    
+    // Delete all marked edges
+    const newEdges = get().edges.filter(edge => !edgesToDelete.includes(edge.id));
+    set({
+      edges: newEdges,
+    });
+  },
+}));
+
+// Helper function to calculate distance from a point to a line segment
+function distanceToLineSegment(x1: number, y1: number, x2: number, y2: number, px: number, py: number): number {
+  const A = px - x1;
+  const B = py - y1;
+  const C = x2 - x1;
+  const D = y2 - y1;
+  
+  const dot = A * C + B * D;
+  const lenSq = C * C + D * D;
+  
+  // Parameter for closest point on line
+  let param = -1;
+  if (lenSq !== 0) param = dot / lenSq;
+  
+  let xx, yy;
+  
+  // Find closest point on line segment
+  if (param < 0) {
+    xx = x1;
+    yy = y1;
+  } else if (param > 1) {
+    xx = x2;
+    yy = y2;
+  } else {
+    xx = x1 + param * C;
+    yy = y1 + param * D;
+  }
+  
+  const dx = px - xx;
+  const dy = py - yy;
+  
+  return Math.sqrt(dx * dx + dy * dy);
+} 
