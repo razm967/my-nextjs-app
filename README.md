@@ -16,41 +16,15 @@ A modern, interactive flow-based whiteboard application built with Next.js, Reac
 - **Next.js 15**: Modern React framework for production
 - **ReactFlow**: Library for building node-based editors and diagrams
 - **TypeScript**: Strongly typed programming language
-- **Zustand**: State management solution
 - **jsPDF**: PDF generation library
 - **TailwindCSS**: Utility-first CSS framework
-- **React Zoom Pan Pinch**: For advanced zoom and pan functionality
-
+- 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js 18.17.0 or later
-- npm or yarn
-
-### Installation
-
-1. Clone this repository:
-```bash
-git clone <repository-url>
-cd flow-whiteboard
-```
-
-2. Install dependencies:
-```bash
-npm install
-# or
-yarn install
-```
-
-3. Run the development server:
-```bash
-npm run dev
-# or
-yarn dev
-```
-
-4. Open [http://localhost:3000](http://localhost:3000) in your browser.
+- npm
 
 ## Usage
 
