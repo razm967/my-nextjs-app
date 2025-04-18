@@ -2,7 +2,7 @@ import { memo, useState, useRef, CSSProperties, useEffect } from 'react';
 import { Handle, Position, NodeProps, useReactFlow } from 'reactflow';
 import { useFlowStore } from '../../store/flowStore';
 import ContextMenu from '../ContextMenu';
-import { FiCopy, FiCheck, FiX } from 'react-icons/fi';
+import { FiCopy, FiCheck, FiX, FiArrowUp } from 'react-icons/fi';
 
 // Text node component for the flow
 const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?: CSSProperties, draggable?: boolean, selected?: boolean }) => {
@@ -53,6 +53,13 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
   
   // Add state for copy feedback
   const [showCopyFeedback, setShowCopyFeedback] = useState(false);
+  
+  // Add these new states
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [isGeneratingContent, setIsGeneratingContent] = useState(false);
+  
+  // Add this near the top of your component with other state
+  const [isClickOutsideListenerAdded, setIsClickOutsideListenerAdded] = useState(false);
   
   // Update internal state when data changes (e.g., from external sources)
   useEffect(() => {
@@ -209,9 +216,12 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
   };
   
   // Handle blur to exit edit mode and save content
-  const handleBlur = () => {
-    setIsEditing(false);
-    updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily);
+  const handleBlur = (e: React.FocusEvent) => {
+    // Don't exit edit mode on blur when clicking within the node
+    // Let the document-level click handler take care of clicks outside
+    if (nodeRef.current && nodeRef.current.contains(e.relatedTarget as Node)) {
+      return;
+    }
   };
   
   // Handle blur to exit edit mode and save title
@@ -410,6 +420,136 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
     nodeStyle.borderWidth = '2px';
   }
 
+  // Add this function to handle AI content generation
+  const generateContentFromPrompt = async (prompt: string) => {
+    if (!prompt.trim()) return;
+    
+    setIsGeneratingContent(true);
+    
+    try {
+      console.log(`Generating content for node "${title}" using prompt: ${prompt}`);
+      
+      // Call your AI API
+      const response = await fetch('/api/generate-content', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          nodeTitle: title, 
+          userPrompt: prompt,
+          contextType: 'node-content' 
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to generate content: ${response.status} ${errorText}`);
+      }
+      
+      const data = await response.json();
+      
+      // Update the text state directly
+      setText(data.content || '');
+      
+      // Clear the prompt
+      setAiPrompt('');
+      
+    } catch (error: any) {
+      console.error('Error generating content:', error);
+      alert(`Failed to generate content: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setIsGeneratingContent(false);
+    }
+  };
+
+  // Add a function to generate content
+  const generateNodeContent = async () => {
+    if (!aiPrompt.trim()) return;
+    
+    setIsGeneratingContent(true);
+    
+    try {
+      // Call your AI API
+      const response = await fetch('/api/generate-content', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          nodeTitle: title, 
+          userPrompt: aiPrompt,
+          contextType: 'node-content' 
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to generate content: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      // Update the textarea content
+      setText(data.content);
+      
+      // Clear the prompt
+      setAiPrompt('');
+    } catch (error) {
+      console.error('Error generating content:', error);
+      // Could show an error message
+    } finally {
+      setIsGeneratingContent(false);
+    }
+  };
+
+  // Handle AI prompt change
+  const handleAiPromptChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setAiPrompt(e.target.value);
+  };
+
+  // Handle AI prompt submission
+  const handleAiPromptSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    generateNodeContent();
+  };
+
+  // Add this useEffect to handle clicks outside the node
+  useEffect(() => {
+    // Handler function for clicks outside - define this first
+    const handleClickOutside = (event: MouseEvent) => {
+      if (nodeRef.current && !nodeRef.current.contains(event.target as Node)) {
+        // Click was outside the node - save and exit edit mode
+        setIsEditing(false);
+        updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily);
+      }
+    };
+    
+    // Only set up the listener when we're in editing mode
+    if (!isEditing) {
+      // Remove the listener when not in editing mode
+      if (isClickOutsideListenerAdded) {
+        document.removeEventListener('mousedown', handleClickOutside);
+        setIsClickOutsideListenerAdded(false);
+      }
+      return;
+    }
+    
+    // Add the listener if not already added
+    if (!isClickOutsideListenerAdded) {
+      document.addEventListener('mousedown', handleClickOutside);
+      setIsClickOutsideListenerAdded(true);
+    }
+    
+    // Clean up function
+    return () => {
+      if (isClickOutsideListenerAdded) {
+        document.removeEventListener('mousedown', handleClickOutside);
+        setIsClickOutsideListenerAdded(false);
+      }
+    };
+  }, [isEditing, id, text, title, name, textStyle, fontSize, fontFamily, updateNodeText, isClickOutsideListenerAdded]);
+
   return (
     <div
       ref={nodeRef}
@@ -526,21 +666,90 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
         
         {/* Content */}
         {isEditing ? (
-          <textarea
-            ref={textareaRef}
-            autoFocus
-            className={`${inputStyles} p-2 text-sm mt-1 resize-none overflow-hidden w-full break-words`}
-            value={text}
-            onChange={handleTextChange}
-            onBlur={handleBlur}
-            onKeyDown={handleKeyDown}
-            onClick={(e) => {
-              e.stopPropagation();
-              blockNodeDeselection(e);
-            }}
-            style={appliedTextStyle}
-            rows={1}
-          />
+          <div className="space-y-2">
+            <textarea
+              ref={textareaRef}
+              autoFocus
+              className={`${inputStyles} p-2 text-sm mt-1 resize-none overflow-hidden w-full break-words`}
+              value={text}
+              onChange={handleTextChange}
+              onBlur={handleBlur}
+              onKeyDown={handleKeyDown}
+              onClick={(e) => {
+                e.stopPropagation();
+                blockNodeDeselection(e);
+              }}
+              style={appliedTextStyle}
+              rows={1}
+            />
+            
+            {/* AI Content Generation Form */}
+            <div 
+              className="mt-2 border-t border-gray-100 pt-2"
+              onClick={(e) => {
+                // Only stop propagation, don't prevent default
+                e.stopPropagation();
+              }}
+            >
+              <form 
+                onSubmit={handleAiPromptSubmit}
+                className="flex items-center"
+                onMouseDown={(e) => {
+                  // Just stop propagation to prevent blur
+                  e.stopPropagation();
+                }}
+              >
+                <input
+                  type="text"
+                  value={aiPrompt}
+                  onChange={handleAiPromptChange}
+                  placeholder="Ask AI to generate content..."
+                  className="flex-grow text-xs p-1 border border-gray-200 rounded-l focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  disabled={isGeneratingContent}
+                  onMouseDown={(e) => {
+                    // Just stop propagation but allow default input behavior
+                    e.stopPropagation();
+                  }}
+                  onClick={(e) => {
+                    // Just stop propagation but allow default input behavior
+                    e.stopPropagation();
+                  }}
+                />
+                <button
+                  type="submit"
+                  className={`rounded-r p-1 text-xs ${
+                    isGeneratingContent 
+                      ? 'bg-gray-200 text-gray-500 cursor-not-allowed' 
+                      : 'bg-blue-500 text-white hover:bg-blue-600'
+                  } transition-colors`}
+                  disabled={isGeneratingContent}
+                  onMouseDown={(e) => {
+                    // Just stop propagation
+                    e.stopPropagation();
+                  }}
+                >
+                  {isGeneratingContent ? (
+                    <span className="inline-block w-4 h-4">
+                      <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                    </span>
+                  ) : (
+                    <span>Generate</span>
+                  )}
+                </button>
+              </form>
+              <div 
+                className="text-xs text-gray-400 mt-1"
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                Example: "Write about the benefits of {title}" or "Expand on this topic"
+              </div>
+            </div>
+          </div>
         ) : (
           <div
             className="p-1 text-sm whitespace-normal break-words cursor-text text-gray-600 w-full overflow-wrap-anywhere formatted-content"

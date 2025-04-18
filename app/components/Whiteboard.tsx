@@ -1,4 +1,3 @@
-// In Whiteboard.tsx
 import React, { useCallback, useState, useRef, KeyboardEvent, useEffect } from 'react';
 import ReactFlow, {
   Background,
@@ -15,6 +14,7 @@ import { useFlowStore } from '../store/flowStore';
 import nodeTypes from './NodeTypes';
 import FlowToolbar from './FlowToolbar';
 import KnifeTool from './knifeTool';
+import PromptBar from './PromptBar';
 
 // Main Whiteboard component
 const Whiteboard: React.FC = () => {
@@ -405,6 +405,9 @@ const Whiteboard: React.FC = () => {
             </Panel>
           </ReactFlow>
         </div>
+        
+        {/* Add the PromptBar component */}
+        <PromptBar reactFlowInstance={reactFlowInstance} />
       </ReactFlowProvider>
     </div>
   );
