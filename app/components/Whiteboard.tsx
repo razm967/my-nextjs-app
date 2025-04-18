@@ -15,6 +15,7 @@ import nodeTypes from './NodeTypes';
 import FlowToolbar from './FlowToolbar';
 import KnifeTool from './knifeTool';
 import PromptBar from './PromptBar';
+import { v4 as uuidv4 } from 'uuid';
 
 // Main Whiteboard component
 const Whiteboard: React.FC = () => {
@@ -251,7 +252,146 @@ const Whiteboard: React.FC = () => {
     console.log('Duplicated nodes:', selectedNodes.length);
   }, [reactFlowInstance, nodes, pasteNodes]);
   
-  // Update the handleKeyDown to include the Escape key handling
+  // Add a function to group selected nodes
+  const handleGroupNodes = useCallback(() => {
+    if (!reactFlowInstance) return;
+    
+    const selectedNodes = nodes.filter(node => node.selected);
+    
+    if (selectedNodes.length < 2) {
+      alert('Please select at least 2 nodes to group');
+      return;
+    }
+    
+    // Calculate the bounding box of all selected nodes
+    const positions = selectedNodes.map(node => ({
+      left: node.position.x,
+      right: node.position.x + (node.width || 200),
+      top: node.position.y,
+      bottom: node.position.y + (node.height || 100)
+    }));
+    
+    const boundingBox = {
+      left: Math.min(...positions.map(p => p.left)),
+      right: Math.max(...positions.map(p => p.right)),
+      top: Math.min(...positions.map(p => p.top)),
+      bottom: Math.max(...positions.map(p => p.bottom))
+    };
+    
+    // Add padding to the bounding box
+    const padding = 20;
+    boundingBox.left -= padding;
+    boundingBox.right += padding;
+    boundingBox.top -= padding;
+    boundingBox.bottom += padding;
+    
+    // Create a unique group ID
+    const groupId = `group-${uuidv4()}`;
+    
+    // Mark all selected nodes as part of this group
+    reactFlowInstance.setNodes(nodes.map(node => {
+      if (node.selected) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            groupId: groupId
+          },
+          // Keep their selection state
+          selected: true
+        };
+      }
+      return node;
+    }));
+    
+    // Create a new group node
+    const groupNode = {
+      id: groupId,
+      type: 'groupNode', // We'll need to create this node type
+      position: {
+        x: boundingBox.left,
+        y: boundingBox.top
+      },
+      data: {
+        label: 'Group',
+        width: boundingBox.right - boundingBox.left,
+        height: boundingBox.bottom - boundingBox.top,
+        childNodeIds: selectedNodes.map(node => node.id)
+      },
+      selected: false
+    };
+    
+    // Add the group node to the flow
+    useFlowStore.getState().addCustomNode(groupNode);
+    
+    console.log('Created group with ID:', groupId);
+  }, [reactFlowInstance, nodes]);
+  
+  // Add ungrouping function
+  const handleUngroupNodes = useCallback(() => {
+    if (!reactFlowInstance) return;
+    
+    const selectedNodes = nodes.filter(node => node.selected);
+    
+    // Check if there's a selected group node
+    const selectedGroupNodes = selectedNodes.filter(node => node.type === 'groupNode');
+    
+    if (selectedGroupNodes.length === 0) {
+      // If no group is selected, but a grouped node is selected, ungroup its parent
+      const groupedNodes = selectedNodes.filter(node => node.data?.groupId);
+      if (groupedNodes.length > 0) {
+        // Get unique group IDs
+        const groupIds = [...new Set(groupedNodes.map(node => node.data.groupId))];
+        
+        // For each group, ungroup the nodes
+        groupIds.forEach(groupId => {
+          // Remove group ID from all nodes in this group
+          reactFlowInstance.setNodes(nodes => 
+            nodes.map(node => {
+              if (node.data?.groupId === groupId) {
+                const { groupId: _, ...restData } = node.data;
+                return {
+                  ...node,
+                  data: restData
+                };
+              }
+              return node;
+            })
+          );
+          
+          // Delete the group node
+          deleteNode(groupId);
+        });
+      }
+      return;
+    }
+    
+    // Ungroup all selected group nodes
+    selectedGroupNodes.forEach(groupNode => {
+      // Get the group ID
+      const groupId = groupNode.id;
+      
+      // Remove group ID from all nodes in this group
+      reactFlowInstance.setNodes(nodes => 
+        nodes.map(node => {
+          if (node.data?.groupId === groupId) {
+            const { groupId: _, ...restData } = node.data;
+            return {
+              ...node,
+              data: restData
+            };
+          }
+          return node;
+        })
+      );
+      
+      // Delete the group node
+      deleteNode(groupId);
+    });
+    
+  }, [reactFlowInstance, nodes, deleteNode]);
+  
+  // Update the handleKeyDown function to include Ctrl+A shortcut
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
     if (event.key === 'Shift') {
       setShiftPressed(true);
@@ -281,6 +421,33 @@ const Whiteboard: React.FC = () => {
           event.preventDefault();
           duplicateSelectedNodes();
           break;
+        case 'a': // Select All
+          event.preventDefault();
+          if (reactFlowInstance) {
+            // Get all nodes and select them
+            reactFlowInstance.setNodes(nodes => 
+              nodes.map(node => ({
+                ...node,
+                selected: true
+              }))
+            );
+            console.log('Selected all nodes with Ctrl+A');
+          }
+          break;
+        case 'g': // Group or ungroup nodes
+          event.preventDefault();
+          
+          // Check if we're working with a group
+          const selectedNodes = nodes.filter(node => node.selected);
+          const hasSelectedGroup = selectedNodes.some(node => node.type === 'groupNode');
+          const hasGroupedNode = selectedNodes.some(node => node.data?.groupId);
+          
+          if (hasSelectedGroup || hasGroupedNode) {
+            handleUngroupNodes();
+          } else {
+            handleGroupNodes();
+          }
+          break;
       }
     }
   }, [
@@ -289,7 +456,11 @@ const Whiteboard: React.FC = () => {
     pasteNodes, 
     cutSelectedNodes, 
     duplicateSelectedNodes,
-    handleEscapeKey
+    handleEscapeKey,
+    reactFlowInstance,
+    handleGroupNodes,
+    handleUngroupNodes,
+    nodes
   ]);
   
   // Handle key up events
@@ -338,6 +509,8 @@ const Whiteboard: React.FC = () => {
           reactFlowInstance={reactFlowInstance} 
           isKnifeActive={isKnifeActive}
           onKnifeToggle={toggleKnifeTool}
+          onGroupNodes={handleGroupNodes}
+          onUngroupNodes={handleUngroupNodes}
         />
         
         <div className="flex-grow relative">
@@ -390,11 +563,13 @@ const Whiteboard: React.FC = () => {
             {/* Help panel */}
             <Panel position="top-left" className="bg-white p-2 rounded shadow-md text-xs text-gray-600">
               <div><kbd className="px-1 py-0.5 bg-gray-100 rounded border border-gray-300">Shift</kbd> + Drag to pan</div>
+              <div><kbd className="px-1 py-0.5 bg-gray-100 rounded border border-gray-300">Ctrl</kbd> + A to select all</div>
               <div><kbd className="px-1 py-0.5 bg-gray-100 rounded border border-gray-300">Ctrl</kbd> + C to copy</div>
               <div><kbd className="px-1 py-0.5 bg-gray-100 rounded border border-gray-300">Ctrl</kbd> + V to paste</div>
               <div><kbd className="px-1 py-0.5 bg-gray-100 rounded border border-gray-300">Ctrl</kbd> + X to cut</div>
               <div><kbd className="px-1 py-0.5 bg-gray-100 rounded border border-gray-300">Ctrl</kbd> + D to duplicate</div>
               <div><kbd className="px-1 py-0.5 bg-gray-100 rounded border border-gray-300">Esc</kbd> to cancel cut</div>
+              <div><kbd className="px-1 py-0.5 bg-gray-100 rounded border border-gray-300">Ctrl</kbd> + G to group nodes</div>
               {cutMode && (
                 <div className="mt-1 text-red-500 flex items-center">
                   <div className="w-3 h-3 border border-dashed border-red-500 mr-1"></div>

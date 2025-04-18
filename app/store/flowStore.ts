@@ -39,11 +39,13 @@ type RFState = {
     textStyle?: CSSProperties, 
     fontSize?: string, 
     fontFamily?: string,
-    richTextFormats?: RichTextFormat[]
+    richTextFormats?: RichTextFormat[],
+    additionalData?: Record<string, any>
   ) => void;
   deleteNode: (nodeId: string) => void;
   deleteEdge: (edgeId: string) => void;
   deleteEdgesByPosition: (x: number, y: number, radius: number) => void;
+  addCustomNode: (node: Node) => void;
 };
 
 // Initial nodes for our flow
@@ -124,7 +126,8 @@ export const useFlowStore = create<RFState>((set, get) => ({
     textStyle?: CSSProperties, 
     fontSize?: string, 
     fontFamily?: string,
-    richTextFormats?: RichTextFormat[]
+    richTextFormats?: RichTextFormat[],
+    additionalData?: Record<string, any>
   ) => {
     set({
       nodes: get().nodes.map((node) => {
@@ -159,6 +162,11 @@ export const useFlowStore = create<RFState>((set, get) => ({
           // Only update richTextFormats if provided
           if (richTextFormats !== undefined) {
             updatedData.richTextFormats = richTextFormats;
+          }
+          
+          // Add any additional data properties
+          if (additionalData) {
+            Object.assign(updatedData, additionalData);
           }
           
           return {
@@ -231,6 +239,13 @@ export const useFlowStore = create<RFState>((set, get) => ({
     set({
       edges: newEdges,
     });
+  },
+  
+  // Add a new custom node to the flow
+  addCustomNode: (node: Node) => {
+    set(state => ({
+      nodes: [...state.nodes, node]
+    }));
   },
 }));
 

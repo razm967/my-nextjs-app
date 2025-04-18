@@ -1,25 +1,48 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState, useRef, useEffect } from 'react';
 import { useFlowStore } from '../store/flowStore';
 import { jsPDF } from 'jspdf';
 import { ReactFlowInstance } from 'reactflow';
 import KnifeTool from './knifeTool';
-import html2canvas from 'html2canvas';
+import { FiFileText, FiChevronDown, FiUnlock } from 'react-icons/fi';
+import { LuGroup } from 'react-icons/lu';
 
 // Props interface for the Toolbar component
 interface FlowToolbarProps {
   reactFlowInstance: ReactFlowInstance | null;
   isKnifeActive: boolean;
   onKnifeToggle: () => void;
+  onGroupNodes: () => void;
+  onUngroupNodes: () => void;
 }
 
 // Toolbar component with node creation and control functions
 const FlowToolbar: React.FC<FlowToolbarProps> = ({ 
   reactFlowInstance, 
   isKnifeActive, 
-  onKnifeToggle 
+  onKnifeToggle,
+  onGroupNodes,
+  onUngroupNodes,
 }) => {
   // Get addNode function from our store
   const addNode = useFlowStore((state) => state.addNode);
+
+  // Add state for dropdown visibility
+  const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+
+  // Add refs for each dropdown container
+  const fileDropdownRef = useRef<HTMLDivElement>(null);
+  const nodesDropdownRef = useRef<HTMLDivElement>(null);
+  const viewDropdownRef = useRef<HTMLDivElement>(null);
+  const toolsDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Toggle dropdown visibility
+  const toggleDropdown = (dropdown: string) => {
+    if (activeDropdown === dropdown) {
+      setActiveDropdown(null);
+    } else {
+      setActiveDropdown(dropdown);
+    }
+  };
 
   // Handle adding a new text node
   const handleAddTextNode = () => {
@@ -32,6 +55,7 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({
       : { x: 100, y: 100 }; // Fallback position
     
     addNode('textNode', position);
+    setActiveDropdown(null);
   };
 
   // Handle adding a new connector node
@@ -45,6 +69,7 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({
       : { x: 100, y: 200 }; // Fallback position
     
     addNode('connectorNode', position);
+    setActiveDropdown(null);
   };
 
   // Handle adding a new title node
@@ -59,6 +84,7 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({
     
     // Add a title node
     addNode('titleNode', position);
+    setActiveDropdown(null);
   };
 
   // First, add these helper functions to check if the flow is linear and trace it
@@ -182,30 +208,51 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({
     return orderedNodes;
   }, [reactFlowInstance]);
 
-  // Now, modify the existing exportToPDF function to use these helper functions
+  // First, add a function to sort nodes by vertical position (top to bottom)
+  const sortNodesByVerticalPosition = useCallback(() => {
+    if (!reactFlowInstance) return [];
+    
+    const allNodes = reactFlowInstance.getNodes();
+    
+    // Sort nodes by Y position (top to bottom)
+    return [...allNodes].sort((a, b) => a.position.y - b.position.y);
+  }, [reactFlowInstance]);
+
+  // Now, modify the exportToPDF function to handle unconnected nodes
   const exportToPDF = useCallback(async () => {
     if (!reactFlowInstance) {
       alert('Flow instance not available');
       return;
     }
     
-    // Check if flow is linear
-    const linear = isLinearFlow();
+    // Check if there are any edges at all
+    const allEdges = reactFlowInstance.getEdges();
+    const hasConnections = allEdges.length > 0;
     
-    if (!linear) {
-      alert("Flow must be linear to export (one start node, one end node, and a single path between them).");
+    let orderedNodes = [];
+    
+    if (hasConnections) {
+      // Check if flow is linear
+      const linear = isLinearFlow();
+      
+      if (!linear) {
+        alert("Flow must be linear to export (one start node, one end node, and a single path between them).");
+        return;
+      }
+      
+      // Get ordered nodes from the linear flow
+      orderedNodes = traceLinearFlow();
+    } else {
+      // If no connections, sort nodes top-to-bottom
+      orderedNodes = sortNodesByVerticalPosition();
+    }
+    
+    if (orderedNodes.length === 0) {
+      alert('No nodes found in the flow');
       return;
     }
     
     try {
-      // Get ordered nodes
-      const orderedNodes = traceLinearFlow();
-      
-      if (orderedNodes.length === 0) {
-        alert('No nodes found in the flow');
-        return;
-      }
-      
       // Create a very simple PDF
       const pdf = new jsPDF();
       
@@ -246,70 +293,172 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({
       const pdfOutput = pdf.output('dataurlnewwindow');
       console.log("PDF export attempted");
       
+      // Close dropdown after exporting
+      setActiveDropdown(null);
     } catch (error) {
       console.error("PDF export error:", error);
       alert("Error exporting PDF. Check console for details.");
     }
-  }, [reactFlowInstance, isLinearFlow, traceLinearFlow]);
+  }, [reactFlowInstance, isLinearFlow, traceLinearFlow, sortNodesByVerticalPosition]);
 
   // Reset the viewport to fit all nodes
   const handleFitView = () => {
     if (reactFlowInstance) {
       reactFlowInstance.fitView({ padding: 0.2 });
     }
+    setActiveDropdown(null);
   };
 
+  // Handle clicking outside to close dropdowns
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      // Don't close if no dropdown is active
+      if (!activeDropdown) return;
+      
+      // Get the relevant dropdown ref based on which dropdown is active
+      let currentDropdownRef = null;
+      switch (activeDropdown) {
+        case 'file': currentDropdownRef = fileDropdownRef; break;
+        case 'nodes': currentDropdownRef = nodesDropdownRef; break;
+        case 'view': currentDropdownRef = viewDropdownRef; break;
+        case 'tools': currentDropdownRef = toolsDropdownRef; break;
+      }
+      
+      // Check if click was outside the dropdown
+      if (currentDropdownRef && 
+          currentDropdownRef.current && 
+          !currentDropdownRef.current.contains(event.target as Node)) {
+        setActiveDropdown(null);
+      }
+    };
+    
+    // Add event listener
+    document.addEventListener('mousedown', handleClickOutside);
+    
+    // Clean up
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [activeDropdown]);
+
   return (
-    <div className="flex items-center bg-white border-b border-gray-200 p-2 shadow-sm">
-      <div className="text-lg font-bold flex-1">Flow Whiteboard</div>
-      
-      <div className="flex space-x-2">
+    <div className="flex items-center bg-black text-white h-8 px-4">
+      {/* Dropdown for File */}
+      <div className="relative mr-4" ref={fileDropdownRef}>
         <button 
-          onClick={handleAddTitleNode}
-          className="bg-yellow-500 text-white px-3 py-1 rounded hover:bg-yellow-600"
-          title="Add a title (not included in exports)"
+          className="flex items-center hover:text-gray-300"
+          onClick={() => toggleDropdown('file')}
         >
-          Add Title
+          File <FiChevronDown className={`ml-1 transition-transform ${activeDropdown === 'file' ? 'rotate-180' : ''}`} size={14} />
         </button>
-        
-        <button 
-          onClick={handleAddTextNode}
-          className="bg-secondary text-white px-3 py-1 rounded hover:bg-opacity-80"
-        >
-          Add Text Node
-        </button>
-        
-        <button 
-          onClick={handleAddConnectorNode}
-          className="bg-purple-600 text-white px-3 py-1 rounded hover:bg-opacity-80 flex items-center"
-          title="Add a connector node for easier connections"
-        >
-          <svg className="mr-1" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19"></line>
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-          </svg>
-          Connector
-        </button>
-        
-        <button 
-          onClick={handleFitView}
-          className="bg-primary text-white px-3 py-1 rounded hover:bg-opacity-80"
-        >
-          Fit View
-        </button>
-        
-        <button 
-          onClick={exportToPDF}
-          className="bg-tertiary text-white px-3 py-1 rounded hover:bg-opacity-80"
-        >
-          Export PDF
-        </button>
+        {activeDropdown === 'file' && (
+          <div className="absolute top-8 left-0 bg-gray-800 w-40 shadow-lg rounded z-10">
+            <button 
+              className="flex items-center px-4 py-2 w-full text-left hover:bg-gray-700"
+              onClick={exportToPDF}
+            >
+              <FiFileText className="mr-2" size={14} />
+              Export PDF
+            </button>
+          </div>
+        )}
       </div>
-      
-      <KnifeTool 
-        active={isKnifeActive} 
-        onToggle={onKnifeToggle} 
-      />
+
+      {/* Dropdown for Nodes */}
+      <div className="relative mr-4" ref={nodesDropdownRef}>
+        <button 
+          className="flex items-center hover:text-gray-300"
+          onClick={() => toggleDropdown('nodes')}
+        >
+          Nodes <FiChevronDown className={`ml-1 transition-transform ${activeDropdown === 'nodes' ? 'rotate-180' : ''}`} size={14} />
+        </button>
+        {activeDropdown === 'nodes' && (
+          <div className="absolute top-8 left-0 bg-gray-800 w-40 shadow-lg rounded z-10">
+            <button 
+              className="px-4 py-2 w-full text-left hover:bg-gray-700"
+              onClick={handleAddTitleNode}
+            >
+              Title Node
+            </button>
+            <button 
+              className="px-4 py-2 w-full text-left hover:bg-gray-700"
+              onClick={handleAddTextNode}
+            >
+              Text Node
+            </button>
+            <button 
+              className="px-4 py-2 w-full text-left hover:bg-gray-700"
+              onClick={handleAddConnectorNode}
+            >
+              Connector Node
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Dropdown for View */}
+      <div className="relative mr-4" ref={viewDropdownRef}>
+        <button 
+          className="flex items-center hover:text-gray-300"
+          onClick={() => toggleDropdown('view')}
+        >
+          View <FiChevronDown className={`ml-1 transition-transform ${activeDropdown === 'view' ? 'rotate-180' : ''}`} size={14} />
+        </button>
+        {activeDropdown === 'view' && (
+          <div className="absolute top-8 left-0 bg-gray-800 w-40 shadow-lg rounded z-10">
+            <button 
+              className="px-4 py-2 w-full text-left hover:bg-gray-700"
+              onClick={handleFitView}
+            >
+              Fit View
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Tools dropdown */}
+      <div className="relative mr-4" ref={toolsDropdownRef}>
+        <button 
+          className="flex items-center hover:text-gray-300"
+          onClick={() => toggleDropdown('tools')}
+        >
+          Tools <FiChevronDown className={`ml-1 transition-transform ${activeDropdown === 'tools' ? 'rotate-180' : ''}`} size={14} />
+        </button>
+        {activeDropdown === 'tools' && (
+          <div className="absolute top-8 left-0 bg-gray-800 w-40 shadow-lg rounded z-10">
+            <button 
+              className="flex items-center px-4 py-2 w-full text-left hover:bg-gray-700"
+              onClick={() => {
+                onGroupNodes();
+                setActiveDropdown(null);
+              }}
+            >
+              {/* dont change size */}
+              <LuGroup  className="mr-2" size={45} /> 
+              Group Nodes (Ctrl+G)
+            </button>
+            <button 
+              className="flex items-center px-4 py-2 w-full text-left hover:bg-gray-700"
+              onClick={() => {
+                onUngroupNodes();
+                setActiveDropdown(null);
+              }}
+            >
+              {/*make toolbar icons bigger than  14*/}
+              <FiUnlock className="mr-2" size={30} />
+              Ungroup (Ctrl+G)
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Keep KnifeTool on the right side */}
+      <div className="ml-auto">
+        <KnifeTool 
+          active={isKnifeActive} 
+          onToggle={onKnifeToggle} 
+        />
+      </div>
     </div>
   );
 };

@@ -58,9 +58,6 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
   const [aiPrompt, setAiPrompt] = useState('');
   const [isGeneratingContent, setIsGeneratingContent] = useState(false);
   
-  // Add this near the top of your component with other state
-  const [isClickOutsideListenerAdded, setIsClickOutsideListenerAdded] = useState(false);
-  
   // Update internal state when data changes (e.g., from external sources)
   useEffect(() => {
     setText(data.text || '');
@@ -218,10 +215,13 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
   // Handle blur to exit edit mode and save content
   const handleBlur = (e: React.FocusEvent) => {
     // Don't exit edit mode on blur when clicking within the node
-    // Let the document-level click handler take care of clicks outside
     if (nodeRef.current && nodeRef.current.contains(e.relatedTarget as Node)) {
       return;
     }
+    
+    // If blur is to somewhere outside the node, save and exit edit mode
+    setIsEditing(false);
+    updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily);
   };
   
   // Handle blur to exit edit mode and save title
@@ -516,39 +516,31 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
 
   // Add this useEffect to handle clicks outside the node
   useEffect(() => {
-    // Handler function for clicks outside - define this first
+    // Skip if not editing
+    if (!isAnyEditing) return;
+
+    // Handler function for clicks outside
     const handleClickOutside = (event: MouseEvent) => {
       if (nodeRef.current && !nodeRef.current.contains(event.target as Node)) {
-        // Click was outside the node - save and exit edit mode
-        setIsEditing(false);
+        // Click was outside the node - save all changes and exit edit modes
+        // Using a single batch update is cleaner
         updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily);
+        
+        // Set all editing states to false at once
+        setIsEditing(false);
+        setIsTitleEditing(false);
+        setIsNameEditing(false);
       }
     };
     
-    // Only set up the listener when we're in editing mode
-    if (!isEditing) {
-      // Remove the listener when not in editing mode
-      if (isClickOutsideListenerAdded) {
-        document.removeEventListener('mousedown', handleClickOutside);
-        setIsClickOutsideListenerAdded(false);
-      }
-      return;
-    }
+    // Add the listener
+    document.addEventListener('mousedown', handleClickOutside);
     
-    // Add the listener if not already added
-    if (!isClickOutsideListenerAdded) {
-      document.addEventListener('mousedown', handleClickOutside);
-      setIsClickOutsideListenerAdded(true);
-    }
-    
-    // Clean up function
+    // Clean up function - always remove listener regardless of state
     return () => {
-      if (isClickOutsideListenerAdded) {
-        document.removeEventListener('mousedown', handleClickOutside);
-        setIsClickOutsideListenerAdded(false);
-      }
+      document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isEditing, id, text, title, name, textStyle, fontSize, fontFamily, updateNodeText, isClickOutsideListenerAdded]);
+  }, [isAnyEditing, id, text, title, name, textStyle, fontSize, fontFamily, updateNodeText]);
 
   return (
     <div
