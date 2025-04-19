@@ -9,6 +9,9 @@ import ReactFlow, {
   BackgroundVariant,
   Panel,
   PanOnScrollMode,
+  NodeChange,
+  EdgeChange,
+  Connection
 } from 'reactflow';
 import { useFlowStore } from '../store/flowStore';
 import nodeTypes from './NodeTypes';
@@ -16,6 +19,7 @@ import FlowToolbar from './FlowToolbar';
 import KnifeTool from './knifeTool';
 import PromptBar from './PromptBar';
 import { v4 as uuidv4 } from 'uuid';
+import { useHistoryStore } from '../store/historyStore';
 
 // Main Whiteboard component
 const Whiteboard: React.FC = () => {
@@ -54,6 +58,9 @@ const Whiteboard: React.FC = () => {
   // Add a state to track if we're in cut mode (nodes selected for moving)
   const [cutMode, setCutMode] = useState(false);
 
+  // Add history management hooks
+  const { saveState, undo, redo } = useHistoryStore();
+
   // Toggle knife tool activation
   const toggleKnifeTool = useCallback(() => {
     setIsKnifeActive(prev => !prev);
@@ -64,8 +71,20 @@ const Whiteboard: React.FC = () => {
     setReactFlowInstance(instance);
   }, []);
   
-  // Copy selected nodes to clipboard
+  // Helper function to check if the active element is an input field
+  const isEditingText = useCallback(() => {
+    const activeElement = document.activeElement;
+    const isTextInput = activeElement instanceof HTMLInputElement || 
+                        activeElement instanceof HTMLTextAreaElement || 
+                        ((activeElement as HTMLElement)?.isContentEditable === true);
+    return isTextInput;
+  }, []);
+  
+  // Update the copySelectedNodes function
   const copySelectedNodes = useCallback(() => {
+    // Skip if the user is editing text in an input field
+    if (isEditingText()) return;
+    
     if (!reactFlowInstance) return;
     
     const selectedNodes = nodes.filter(node => node.selected);
@@ -89,7 +108,7 @@ const Whiteboard: React.FC = () => {
     }
     
     console.log('Copied nodes:', selectedNodes.length);
-  }, [reactFlowInstance, nodes]);
+  }, [reactFlowInstance, nodes, isEditingText]);
   
   // Add a function to update mouse position (call this in the component)
   const handleMouseMove = useCallback((event: React.MouseEvent) => {
@@ -110,6 +129,9 @@ const Whiteboard: React.FC = () => {
   
   // When we enter cut mode, we'll mark the selected nodes
   const cutSelectedNodes = useCallback(() => {
+    // Skip if the user is editing text in an input field
+    if (isEditingText()) return;
+    
     if (!reactFlowInstance) return;
     
     const selectedNodes = nodes.filter(node => node.selected);
@@ -140,7 +162,7 @@ const Whiteboard: React.FC = () => {
     );
     
     console.log('Cut nodes marked using setNodes');
-  }, [reactFlowInstance, nodes]);
+  }, [reactFlowInstance, nodes, isEditingText]);
   
   // When pasting or canceling cut mode, remove the indicators
   const clearCutIndicators = useCallback(() => {
@@ -172,6 +194,9 @@ const Whiteboard: React.FC = () => {
 
   // Update the paste function to handle both copy and cut operations
   const pasteNodes = useCallback(() => {
+    // Skip if the user is editing text in an input field
+    if (isEditingText()) return;
+    
     if (!reactFlowInstance || copiedNodes.length === 0) return;
     
     // Calculate the center point of the copied nodes
@@ -231,7 +256,7 @@ const Whiteboard: React.FC = () => {
     });
     
     console.log('Pasted nodes:', copiedNodes.length, 'at position:', mousePosition);
-  }, [reactFlowInstance, copiedNodes, addNode, mousePosition, cutMode, deleteNode, clearCutIndicators]);
+  }, [reactFlowInstance, copiedNodes, addNode, mousePosition, cutMode, deleteNode, clearCutIndicators, isEditingText]);
   
   // Duplicate selected nodes immediately
   const duplicateSelectedNodes = useCallback(() => {
@@ -391,6 +416,43 @@ const Whiteboard: React.FC = () => {
     
   }, [reactFlowInstance, nodes, deleteNode]);
   
+  // Modify the existing node and edge change handlers to save history
+  const enhancedOnNodesChange = useCallback((changes: NodeChange[]) => {
+    // Skip saving for selection/deselection changes
+    const significantChanges = changes.filter(
+      (change: NodeChange) => change.type !== 'select' || (change.type === 'select' && change.selected === true)
+    );
+    
+    // Only save state for meaningful changes
+    if (significantChanges.length > 0) {
+      onNodesChange(changes);
+      saveState();
+    } else {
+      onNodesChange(changes);
+    }
+  }, [onNodesChange, saveState]);
+  
+  const enhancedOnEdgesChange = useCallback((changes: EdgeChange[]) => {
+    onEdgesChange(changes);
+    saveState();
+  }, [onEdgesChange, saveState]);
+  
+  const enhancedOnConnect = useCallback((params: Connection) => {
+    onConnect(params);
+    saveState();
+  }, [onConnect, saveState]);
+  
+  // Enhance existing node operations to save history
+  const enhancedAddNode = useCallback((type: string, position: { x: number, y: number }) => {
+    addNode(type, position);
+    saveState();
+  }, [addNode, saveState]);
+  
+  const enhancedDeleteNode = useCallback((nodeId: string) => {
+    deleteNode(nodeId);
+    saveState();
+  }, [deleteNode, saveState]);
+  
   // Update the handleKeyDown function to include Ctrl+A shortcut
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
     if (event.key === 'Shift') {
@@ -399,8 +461,8 @@ const Whiteboard: React.FC = () => {
       handleEscapeKey(event);
     }
     
-    // Only process shortcuts if we're not in edit mode
-    if (isNodeEditing) return;
+    // Only process shortcuts if we're not in edit mode and not in a text field
+    if (isNodeEditing || isEditingText()) return;
     
     // Check for keyboard shortcuts
     if (event.ctrlKey || event.metaKey) {
@@ -448,6 +510,20 @@ const Whiteboard: React.FC = () => {
             handleGroupNodes();
           }
           break;
+        case 'z': // Undo
+          event.preventDefault();
+          if (event.shiftKey) {
+            // Ctrl+Shift+Z or Cmd+Shift+Z for redo
+            redo();
+          } else {
+            // Ctrl+Z or Cmd+Z for undo
+            undo();
+          }
+          break;
+        case 'y': // Redo
+          event.preventDefault();
+          redo();
+          break;
       }
     }
   }, [
@@ -460,7 +536,10 @@ const Whiteboard: React.FC = () => {
     reactFlowInstance,
     handleGroupNodes,
     handleUngroupNodes,
-    nodes
+    nodes,
+    undo, 
+    redo,
+    isEditingText
   ]);
   
   // Handle key up events
@@ -495,6 +574,11 @@ const Whiteboard: React.FC = () => {
     return () => observer.disconnect();
   }, []);
 
+  // Save state after batch operations
+  useEffect(() => {
+    saveState(); // Save initial state
+  }, [saveState]);
+
   return (
     <div 
       className="h-screen w-full flex flex-col"
@@ -517,9 +601,9 @@ const Whiteboard: React.FC = () => {
           <ReactFlow
             nodes={nodes}
             edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
+            onNodesChange={enhancedOnNodesChange}
+            onEdgesChange={enhancedOnEdgesChange}
+            onConnect={enhancedOnConnect}
             nodeTypes={nodeTypes}
             onInit={onInit}
             fitView

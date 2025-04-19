@@ -199,6 +199,7 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
   
   // Handle text change
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    e.stopPropagation();
     setText(e.target.value);
   };
   
@@ -247,47 +248,48 @@ const TextNode = ({ id, data, style, draggable, selected }: NodeProps & { style?
   
   // Handle key press for content (Enter to save, Escape to cancel)
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Stop propagation to prevent triggering global shortcuts
+    e.stopPropagation();
+    
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       setIsEditing(false);
       updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily);
     } else if (e.key === 'Escape') {
+      e.preventDefault();
       setIsEditing(false);
-      setText(data.text || ''); // Reset to original text
+      setText(data.text || '');
     }
-    
-    // Prevent propagation to avoid triggering ReactFlow shortcuts
-    e.stopPropagation();
   };
   
   // Handle key press for title (Enter to save, Escape to cancel)
   const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    e.stopPropagation();
+    
     if (e.key === 'Enter') {
       e.preventDefault();
       setIsTitleEditing(false);
       updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily);
     } else if (e.key === 'Escape') {
+      e.preventDefault();
       setIsTitleEditing(false);
-      setTitle(data.label || ''); // Reset to original title
+      setTitle(data.label || '');
     }
-    
-    // Prevent propagation to avoid triggering ReactFlow shortcuts
-    e.stopPropagation();
   };
   
   // Handle key press for name (Enter to save, Escape to cancel)
   const handleNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    e.stopPropagation();
+    
     if (e.key === 'Enter') {
       e.preventDefault();
       setIsNameEditing(false);
       updateNodeText(id, text, title, name, textStyle, fontSize, fontFamily);
     } else if (e.key === 'Escape') {
+      e.preventDefault();
       setIsNameEditing(false);
-      setName(data.name || ''); // Reset to original name
+      setName(data.name || '');
     }
-    
-    // Prevent propagation to avoid triggering ReactFlow shortcuts
-    e.stopPropagation();
   };
   
   // Handle right click to show context menu
